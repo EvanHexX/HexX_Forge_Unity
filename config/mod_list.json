@@ -1,0 +1,11 @@
+{
+  "lyzz_HexX.dll": {
+    "name": "비급 최적화 도구",
+    "description": "용윤입지전 비급 최적화 플러그인"
+  },
+  "test1.dll": {
+    "name": "test mod",
+    "author": "HexX",
+    "description": "테스트 모드 인포"
+  }
+}
