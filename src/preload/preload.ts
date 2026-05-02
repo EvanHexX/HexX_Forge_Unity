@@ -12,6 +12,7 @@ const electronAPI = {
     setGamePath: (gamePath: string) => ipcRenderer.invoke('config:set-game-path', gamePath),
     selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
 
+    // Mod Manager preloads
     scanMods: () => ipcRenderer.invoke('mods:scan'),
     selectModImportFile: () => ipcRenderer.invoke('mods:select-import-file'),
 
@@ -24,7 +25,23 @@ const electronAPI = {
     deleteMod: (relativePath: string) =>
         ipcRenderer.invoke('mods:delete', relativePath),
     setModEnabled: (relativePath: string, enabled: boolean) =>
-        ipcRenderer.invoke('mods:set-enabled', relativePath, enabled)
+        ipcRenderer.invoke('mods:set-enabled', relativePath, enabled),
+
+    // Asset Manager preloads
+    getAssetStatus: () => ipcRenderer.invoke('asset:get-status'),
+    backupAsset: (type: 'font' | 'asset') =>
+        ipcRenderer.invoke('asset:backup', type),
+    getTextureCatalog: () => ipcRenderer.invoke('asset:get-texture-catalog'),
+    getAssetCatalog: () => ipcRenderer.invoke('asset:get-catalog'),
+
+    selectReplacementImage: () =>
+        ipcRenderer.invoke('asset:select-replacement-image'),
+    patchTexture: (params: any) =>
+        ipcRenderer.invoke('texture:patch', params),
+    runClothesPatch: (params: any) =>
+        ipcRenderer.invoke('asset:run-clothes-patch', params),
+    importAssetPack: (zipPath: string) =>
+        ipcRenderer.invoke('asset:import-pack', zipPath),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

@@ -3,9 +3,13 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { app } from 'electron';
 
-const ROOT_DIR = process.cwd();
-const CONFIG_DIR = path.join(ROOT_DIR, 'config');
+// 개발: 프로젝트 루트/config  |  패키지: exe 옆/config
+const CONFIG_DIR = app.isPackaged
+    ? path.join(path.dirname(app.getPath('exe')), 'config')
+    : path.join(process.cwd(), 'config');
+
 const SETTINGS_PATH = path.join(CONFIG_DIR, 'app_settings.json');
 const THEMES_PATH = path.join(CONFIG_DIR, 'themes.json');
 

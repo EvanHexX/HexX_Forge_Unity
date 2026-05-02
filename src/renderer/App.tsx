@@ -8,11 +8,12 @@ import Home from './pages/Home';
 import Settings from './pages/Settings';
 import ModManager from './pages/ModManager';
 import { useTheme } from './hooks/useTheme';
+import AssetManager from "./pages/AssetManager";
 
 type Page = 'home' | 'mod' | 'asset' | 'optimizer' | 'settings';
 
 export default function App() {
-    useTheme();
+    const { currentTheme, themeNames, changeTheme } = useTheme();
 
     const [page, setPage] = useState<Page>('home');
     const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -24,9 +25,9 @@ export default function App() {
             case 'mod':
                 return <ModManager />;
             case 'settings':
-                return <Settings />;
+                return <Settings currentTheme={currentTheme} themeNames={themeNames} changeTheme={changeTheme} />;
             case 'asset':
-                return <Placeholder title="어셋 관리자" />;
+                return <AssetManager />;
             case 'optimizer':
                 return <Placeholder title="비급 최적화 도구" />;
             default:
@@ -35,7 +36,7 @@ export default function App() {
     };
 
     return (
-        <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'var(--bg-color)' }}>
+        <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', bgcolor: 'var(--bg-color)' }}>
             <Sidebar
                 open={sidebarOpen}
                 currentPage={page}
@@ -43,7 +44,7 @@ export default function App() {
                 onChangePage={setPage}
             />
 
-            <Box component="main" sx={{ flex: 1, p: 4, overflow:"auto"}}>
+            <Box component="main" sx={{ flex: 1, p: 4, overflow: 'auto' }}>
                 {renderPage()}
             </Box>
         </Box>

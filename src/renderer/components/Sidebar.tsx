@@ -39,7 +39,8 @@ export default function Sidebar({ open, currentPage, onToggle, onChangePage }: P
         <Box
             sx={{
                 width: open ? 240 : 72,
-                height: '100vh',
+                flexShrink: 0,
+                height: '100%',
                 transition: 'width 160ms ease',
                 background: 'var(--sidebar-bg-color)',
                 borderRight: '1px solid var(--border-color)',

@@ -1,0 +1,11 @@
+{
+  "backupTargets": {
+    "font": [
+      "LongYinLiZhiZhuan_Data/resources.assets"
+    ],
+    "asset": [
+      "LongYinLiZhiZhuan_Data/sharedassets1.assets",
+      "LongYinLiZhiZhuan_Data/sharedassets1.assets.resS"
+    ]
+  }
+}
