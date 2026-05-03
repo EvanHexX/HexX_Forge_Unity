@@ -40,6 +40,12 @@ const electronAPI = {
         ipcRenderer.invoke('texture:patch', params),
     runClothesPatch: (params: any) =>
         ipcRenderer.invoke('asset:run-clothes-patch', params),
+
+    // Asset Pack preloads
+    getAssetPacks: () => ipcRenderer.invoke('asset:get-packs'),
+
+    selectAssetPackZip: () => ipcRenderer.invoke('asset:select-pack-zip'),
+
     importAssetPack: (zipPath: string) =>
         ipcRenderer.invoke('asset:import-pack', zipPath),
 };

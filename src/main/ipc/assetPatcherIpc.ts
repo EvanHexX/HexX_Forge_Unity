@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { runClothesPatch } from '../services/assetPatcherService';
+import {importAssetPack, runClothesPatch} from '../services/assetPatcherService';
 
 export function registerAssetPatcherIpc() {
     ipcMain.handle('asset:run-clothes-patch', (_e, params) => {

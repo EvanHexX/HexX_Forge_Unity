@@ -1,6 +1,6 @@
 // src/renderer/pages/AssetManager.tsx
 
-import {useEffect, useMemo, useState} from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     Box,
     Button,
@@ -13,7 +13,7 @@ import {
     Stack,
     Typography
 } from '@mui/material';
-import {useTextureCatalog} from '../hooks/useTextureCatalog';
+import { useTextureCatalog } from '../hooks/useTextureCatalog';
 
 type BackupStatus = {
     font: string | null;
@@ -35,6 +35,72 @@ type SelectedImage = {
     url: string;
 };
 
+type AssetPackTarget = {
+    id: string;
+    catalogId: string;
+    textureName: string;
+    pathId: number;
+    gender: string;
+    category: string;
+    option2: string;
+    png: string;
+    preview?: string;
+    pngPath: string;
+    pngUrl: string;
+    previewPath: string;
+    previewUrl: string;
+};
+
+type AssetPack = {
+    schemaVersion: number;
+    packId: string;
+    packName: string;
+    author?: string;
+    description?: string;
+    basePath: string;
+    targets: AssetPackTarget[];
+};
+
+function normalizePacks(value: unknown): AssetPack[] {
+    if (Array.isArray(value)) {
+        return value as AssetPack[];
+    }
+
+    if (
+        value &&
+        typeof value === 'object' &&
+        'packs' in value &&
+        Array.isArray((value as { packs: unknown }).packs)
+    ) {
+        return (value as { packs: AssetPack[] }).packs;
+    }
+
+    if (
+        value &&
+        typeof value === 'object' &&
+        'packId' in value &&
+        'targets' in value
+    ) {
+        return [value as AssetPack];
+    }
+
+    return [];
+}
+
+const selectSx = {
+    color: 'var(--text-color)',
+    background: 'var(--input-bg-color)',
+    '.MuiOutlinedInput-notchedOutline': {
+        borderColor: 'var(--border-color)'
+    },
+    '.MuiSvgIcon-root': {
+        color: 'var(--text-color)'
+    },
+    '&.Mui-disabled': {
+        color: 'var(--text-color-light)'
+    }
+};
+
 export default function AssetManager() {
     const [status, setStatus] = useState<BackupStatus>({
         font: null,
@@ -44,7 +110,7 @@ export default function AssetManager() {
     const [fontChecked, setFontChecked] = useState(true);
     const [assetChecked, setAssetChecked] = useState(true);
 
-    const {data: catalog, loading} = useTextureCatalog();
+    const { data: catalog, loading } = useTextureCatalog();
 
     const [selectedType, setSelectedType] = useState('');
     const [selectedGender, setSelectedGender] = useState('');
@@ -53,8 +119,13 @@ export default function AssetManager() {
     const [replacementUrl, setReplacementUrl] = useState('');
     const [replacementPath, setReplacementPath] = useState('');
 
+    const [packs, setPacks] = useState<AssetPack[]>([]);
+    const [selectedPackId, setSelectedPackId] = useState('');
+    const [selectedTargetId, setSelectedTargetId] = useState('');
+
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
+
 
     const loadStatus = async () => {
         const nextStatus = await window.electronAPI.getAssetStatus();
@@ -64,6 +135,17 @@ export default function AssetManager() {
     useEffect(() => {
         loadStatus().catch((err) => {
             setError(err instanceof Error ? err.message : '백업 상태 로드 실패');
+        });
+
+        window.electronAPI.getAssetPacks().then((result) => {
+            const normalized = normalizePacks(result);
+            setPacks(normalized);
+
+            if (normalized.length > 0) {
+                setSelectedPackId(normalized[0].packId || '');
+            }
+        }).catch((err) => {
+            setError(err instanceof Error ? err.message : '의상팩 목록 로드 실패');
         });
     }, []);
 
@@ -87,6 +169,15 @@ export default function AssetManager() {
     const selectedItem = useMemo(() => {
         return catalog.find((item: AssetCatalogItem) => item.id === selectedItemId);
     }, [catalog, selectedItemId]);
+
+    const selectedPack = useMemo(() => {
+        return packs.find((pack) => pack.packId === selectedPackId);
+    }, [packs, selectedPackId]);
+
+    const selectedTarget = useMemo(() => {
+        if (!selectedPack) return undefined;
+        return selectedPack.targets.find((target) => target.id === selectedTargetId);
+    }, [selectedPack, selectedTargetId]);
 
     const handleBackup = async () => {
         try {
@@ -117,11 +208,80 @@ export default function AssetManager() {
 
             if (!result) return;
 
-            setReplacementPath(result.path);
-            setReplacementUrl(result.url);
+            setReplacementPath(result.path || '');
+            setReplacementUrl(result.url || '');
+            setSelectedTargetId('');
         } catch (err) {
             setError(err instanceof Error ? err.message : '변경 이미지 선택 실패');
         }
+    };
+
+    const handleImportPack = async () => {
+        try {
+            setMessage('');
+            setError('');
+
+            const zipPath = await window.electronAPI.selectAssetPackZip();
+
+            if (!zipPath) return;
+
+            const result = await window.electronAPI.importAssetPack(zipPath);
+            const normalized = normalizePacks(result);
+
+            setPacks(normalized);
+
+            const firstPack = normalized[0];
+
+            if (firstPack) {
+                setSelectedPackId(firstPack.packId || '');
+                setSelectedTargetId('');
+                setMessage(`의상팩을 등록했습니다: ${firstPack.packName}`);
+            } else {
+                setMessage('의상팩을 등록했지만 표시할 팩이 없습니다.');
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '의상팩 등록 실패');
+        }
+    };
+
+    const handleSelectPackTarget = (targetId: string) => {
+        const safeTargetId = targetId || '';
+        setSelectedTargetId(safeTargetId);
+        setMessage('');
+        setError('');
+
+        if (!safeTargetId) {
+            setReplacementPath('');
+            setReplacementUrl('');
+            return;
+        }
+
+        const target = selectedPack?.targets.find((item) => item.id === safeTargetId);
+
+        if (!target) {
+            setError(`팩 대상을 찾지 못했습니다: ${safeTargetId}`);
+            return;
+        }
+
+        const matchedCatalog = catalog.find(
+            (item: AssetCatalogItem) => item.id === target.catalogId
+        );
+
+        if (matchedCatalog) {
+            setSelectedItemId(matchedCatalog.id || '');
+            setSelectedType(matchedCatalog.type || '');
+            setSelectedGender(matchedCatalog.gender || '');
+        } else {
+            setSelectedItemId('');
+            setError(`카탈로그 항목을 찾지 못했습니다: ${target.catalogId}`);
+        }
+
+        setReplacementPath(target.pngPath || '');
+        setReplacementUrl(
+            target.previewUrl || target.pngUrl || matchedCatalog?.previewUrl || ''
+        );
+
+        setMessage(`팩 대상 선택됨: ${target.textureName}`);
     };
 
     const handleApplyPatch = async () => {
@@ -151,8 +311,8 @@ export default function AssetManager() {
                 pathId: selectedItem.pathId,
                 pngPath: replacementPath,
                 gender: selectedItem.gender,
-                category: 'clothes',
-                option2: selectedItem.type,
+                category: selectedTarget?.category || 'clothes',
+                option2: selectedTarget?.option2 || selectedItem.type,
                 gamePath: settings.gamePath
             });
 
@@ -162,25 +322,9 @@ export default function AssetManager() {
         }
     };
 
-    const handleImportPack = async () => {
-        try {
-            setMessage('');
-            setError('');
-
-            const zipPath = await window.electronAPI.selectModImportFile();
-
-            if (!zipPath) return;
-
-            await window.electronAPI.importAssetPack(zipPath);
-            setMessage('의상팩을 등록했습니다.');
-        } catch (err) {
-            setError(err instanceof Error ? err.message : '의상팩 등록 실패');
-        }
-    };
-
     return (
         <Box>
-            <Typography variant="h5" sx={{fontWeight: 800, color: 'var(--text-color)'}}>
+            <Typography variant="h5" sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
                 어셋 관리자
             </Typography>
 
@@ -194,31 +338,31 @@ export default function AssetManager() {
                     boxShadow: 'var(--shadow-small)'
                 }}
             >
-                <Typography variant="h6" sx={{fontWeight: 800, color: 'var(--text-color)'}}>
+                <Typography variant="h6" sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
                     백업 상태
                 </Typography>
 
-                <Box sx={{mt: 2}}>
-                    <Typography sx={{color: status.font ? 'var(--text-color-light)' : 'var(--accent-color)'}}>
+                <Box sx={{ mt: 2 }}>
+                    <Typography sx={{ color: status.font ? 'var(--text-color-light)' : 'var(--accent-color)' }}>
                         폰트 백업: {status.font || '백업 파일이 없습니다'}
                     </Typography>
 
-                    <Typography sx={{color: status.asset ? 'var(--text-color-light)' : 'var(--accent-color)'}}>
+                    <Typography sx={{ color: status.asset ? 'var(--text-color-light)' : 'var(--accent-color)' }}>
                         어셋 백업: {status.asset || '백업 파일이 없습니다'}
                     </Typography>
                 </Box>
 
-                <Stack direction="row" spacing={2} sx={{mt: 3, alignItems: 'center'}}>
+                <Stack direction="row" spacing={2} sx={{ mt: 3, alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
                     <Box>
                         <Checkbox
                             checked={fontChecked}
                             onChange={(e) => setFontChecked(e.target.checked)}
                             sx={{
                                 color: 'var(--text-color-light)',
-                                '&.Mui-checked': {color: 'var(--primary-color)'}
+                                '&.Mui-checked': { color: 'var(--primary-color)' }
                             }}
                         />
-                        <Box component="span" sx={{color: 'var(--text-color)'}}>
+                        <Box component="span" sx={{ color: 'var(--text-color)' }}>
                             폰트
                         </Box>
                     </Box>
@@ -229,10 +373,10 @@ export default function AssetManager() {
                             onChange={(e) => setAssetChecked(e.target.checked)}
                             sx={{
                                 color: 'var(--text-color-light)',
-                                '&.Mui-checked': {color: 'var(--primary-color)'}
+                                '&.Mui-checked': { color: 'var(--primary-color)' }
                             }}
                         />
-                        <Box component="span" sx={{color: 'var(--text-color)'}}>
+                        <Box component="span" sx={{ color: 'var(--text-color)' }}>
                             어셋
                         </Box>
                     </Box>
@@ -270,18 +414,90 @@ export default function AssetManager() {
                     boxShadow: 'var(--shadow-small)'
                 }}
             >
-                <Typography variant="h6" sx={{fontWeight: 800, color: 'var(--text-color)'}}>
+                <Typography variant="h6" sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
                     텍스처 미리보기 비교
                 </Typography>
 
-                <Stack direction="row" spacing={2} sx={{mt: 3, flexWrap: 'wrap', rowGap: 2}}>
-                    <FormControl size="small" sx={{minWidth: 180}}>
-                        <InputLabel sx={{color: 'var(--text-color-light)'}}>종류</InputLabel>
+                <Paper
+                    sx={{
+                        mt: 3,
+                        p: 2,
+                        background: 'var(--bg-color)',
+                        border: '1px solid var(--border-color)',
+                        boxShadow: 'none'
+                    }}
+                >
+                    <Typography sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
+                        의상팩
+                    </Typography>
+
+                    <Stack direction="row" spacing={2} sx={{ mt: 2, flexWrap: 'wrap', rowGap: 2 }}>
+                        <FormControl size="small" sx={{ minWidth: 260 }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>팩 선택</InputLabel>
+                            <Select
+                                value={selectedPackId || ''}
+                                label="팩 선택"
+                                onChange={(e) => {
+                                    setSelectedPackId(String(e.target.value || ''));
+                                    setSelectedTargetId('');
+                                }}
+                                sx={selectSx}
+                            >
+                                <MenuItem value="">선택 안 함</MenuItem>
+                                {packs.map((pack) => (
+                                    <MenuItem key={pack.packId} value={pack.packId}>
+                                        {pack.packName}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+
+                        <FormControl size="small" sx={{ minWidth: 340 }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>팩 대상</InputLabel>
+                            <Select
+                                value={selectedTargetId || ''}
+                                label="팩 대상"
+                                disabled={!selectedPack}
+                                onChange={(e) => handleSelectPackTarget(String(e.target.value || ''))}
+                                sx={selectSx}
+                            >
+                                <MenuItem value="">선택 안 함</MenuItem>
+                                {(selectedPack?.targets || []).map((target) => (
+                                    <MenuItem key={target.id} value={target.id}>
+                                        {target.gender} / {target.option2} / {target.textureName}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+
+                        <Button
+                            variant="contained"
+                            onClick={handleImportPack}
+                            sx={{
+                                background: 'var(--button-bg-color)',
+                                color: 'var(--button-text-color)'
+                            }}
+                        >
+                            의상팩 추가
+                        </Button>
+                    </Stack>
+
+                    {selectedPack && (
+                        <Typography sx={{ mt: 2, color: 'var(--text-color-light)' }}>
+                            {selectedPack.author ? `${selectedPack.author} · ` : ''}
+                            {selectedPack.description || '설명 없음'}
+                        </Typography>
+                    )}
+                </Paper>
+
+                <Stack direction="row" spacing={2} sx={{ mt: 3, flexWrap: 'wrap', rowGap: 2 }}>
+                    <FormControl size="small" sx={{ minWidth: 180 }}>
+                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>종류</InputLabel>
                         <Select
-                            value={selectedType}
+                            value={selectedType || ''}
                             label="종류"
                             onChange={(e) => {
-                                setSelectedType(e.target.value);
+                                setSelectedType(String(e.target.value || ''));
                                 setSelectedItemId('');
                             }}
                             sx={selectSx}
@@ -295,13 +511,13 @@ export default function AssetManager() {
                         </Select>
                     </FormControl>
 
-                    <FormControl size="small" sx={{minWidth: 180}}>
-                        <InputLabel sx={{color: 'var(--text-color-light)'}}>성별</InputLabel>
+                    <FormControl size="small" sx={{ minWidth: 180 }}>
+                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>성별</InputLabel>
                         <Select
-                            value={selectedGender}
+                            value={selectedGender || ''}
                             label="성별"
                             onChange={(e) => {
-                                setSelectedGender(e.target.value);
+                                setSelectedGender(String(e.target.value || ''));
                                 setSelectedItemId('');
                             }}
                             sx={selectSx}
@@ -315,14 +531,15 @@ export default function AssetManager() {
                         </Select>
                     </FormControl>
 
-                    <FormControl size="small" sx={{minWidth: 300}}>
-                        <InputLabel sx={{color: 'var(--text-color-light)'}}>원본 텍스처</InputLabel>
+                    <FormControl size="small" sx={{ minWidth: 300 }}>
+                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>원본 텍스처</InputLabel>
                         <Select
-                            value={selectedItemId}
+                            value={selectedItemId || ''}
                             label="원본 텍스처"
-                            onChange={(e) => setSelectedItemId(e.target.value)}
+                            onChange={(e) => setSelectedItemId(String(e.target.value || ''))}
                             sx={selectSx}
                         >
+                            <MenuItem value="">선택 안 함</MenuItem>
                             {filteredItems.map((item: AssetCatalogItem) => (
                                 <MenuItem key={item.id} value={item.id}>
                                     {item.label}
@@ -339,7 +556,7 @@ export default function AssetManager() {
                             color: 'var(--button-text-color)'
                         }}
                     >
-                        변경 이미지 선택
+                        변경 이미지 직접 선택
                     </Button>
 
                     <Button
@@ -357,26 +574,15 @@ export default function AssetManager() {
                     >
                         적용
                     </Button>
-
-                    <Button
-                        variant="contained"
-                        onClick={handleImportPack}
-                        sx={{
-                            background: 'var(--button-bg-color)',
-                            color: 'var(--button-text-color)'
-                        }}
-                    >
-                        의상팩 추가
-                    </Button>
                 </Stack>
 
                 {loading && (
-                    <Typography sx={{mt: 2, color: 'var(--text-color-light)'}}>
+                    <Typography sx={{ mt: 2, color: 'var(--text-color-light)' }}>
                         카탈로그를 불러오는 중입니다.
                     </Typography>
                 )}
 
-                <Stack direction="row" spacing={3} sx={{mt: 3, flexWrap: 'wrap', rowGap: 3}}>
+                <Stack direction="row" spacing={3} sx={{ mt: 3, flexWrap: 'wrap', rowGap: 3 }}>
                     <PreviewCard
                         title="원본 미리보기"
                         imageUrl={selectedItem?.previewUrl || ''}
@@ -403,13 +609,13 @@ export default function AssetManager() {
                     }}
                 >
                     {message && (
-                        <Typography sx={{color: 'var(--primary-color)'}}>
+                        <Typography sx={{ color: 'var(--primary-color)' }}>
                             {message}
                         </Typography>
                     )}
 
                     {error && (
-                        <Typography sx={{color: 'var(--accent-color)', whiteSpace: 'pre-wrap'}}>
+                        <Typography sx={{ color: 'var(--accent-color)', whiteSpace: 'pre-wrap' }}>
                             {error}
                         </Typography>
                     )}
@@ -418,17 +624,6 @@ export default function AssetManager() {
         </Box>
     );
 }
-
-const selectSx = {
-    color: 'var(--text-color)',
-    background: 'var(--input-bg-color)',
-    '.MuiOutlinedInput-notchedOutline': {
-        borderColor: 'var(--border-color)'
-    },
-    '.MuiSvgIcon-root': {
-        color: 'var(--text-color)'
-    }
-};
 
 function PreviewCard({
                          title,
@@ -452,7 +647,7 @@ function PreviewCard({
                 background: 'var(--bg-color)'
             }}
         >
-            <Typography sx={{fontWeight: 700, color: 'var(--text-color)', mb: 1}}>
+            <Typography sx={{ fontWeight: 700, color: 'var(--text-color)', mb: 1 }}>
                 {title}
             </Typography>
 

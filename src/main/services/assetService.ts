@@ -28,6 +28,11 @@ type AssetConfig = {
     };
 };
 
+function toPreviewProtocolUrl(relativePath: string): string {
+    const normalized = relativePath.replaceAll('\\', '/');
+    return `hexx-resource://preview/${encodeURIComponent(normalized).replaceAll('%2F', '/')}`;
+}
+
 export function getAssetCatalog() {
     const catalog = readJsonFile<{ items: AssetCatalogItem[] }>(ASSET_CATALOG_PATH, {
         items: []
@@ -39,9 +44,7 @@ export function getAssetCatalog() {
 
             return {
                 ...item,
-                previewUrl: previewPath && fs.existsSync(previewPath)
-                    ? pathToFileURL(previewPath).toString()
-                    : ''
+                previewUrl: item.preview ? toPreviewProtocolUrl(item.preview) : ''
             };
         })
     };

@@ -2,7 +2,7 @@
 // HexX Forge Electron main process.
 // 앱 창 생성, preload 연결, 개발/배포 환경별 renderer 로딩을 담당합니다.
 
-import {app, BrowserWindow, ipcMain} from 'electron';
+import {app, BrowserWindow, ipcMain, protocol} from 'electron';
 import path from 'node:path';
 
 import {registerConfigIpc} from './ipc/configIpc';
@@ -10,6 +10,20 @@ import {registerModIpc} from './ipc/modIpc';
 import {registerAssetIpc} from './ipc/assetIpc';
 import {registerAssetPatcherIpc} from './ipc/assetPatcherIpc';
 import {registerTextureIpc} from './ipc/textureIpc';
+import {registerAssetPackIpc} from './ipc/assetPackIpc';
+
+protocol.registerSchemesAsPrivileged([
+    {
+        scheme: 'hexx-resource',
+        privileges: {
+            standard: true,
+            secure: true,
+            supportFetchAPI: true,
+            corsEnabled: true
+        }
+    }
+]);
+
 
 const isDev = !app.isPackaged;
 
@@ -37,6 +51,32 @@ function createMainWindow(): void {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 
+async function protocolHandleFile(filePath: string): Promise<Response> {
+    const fs = await import('node:fs/promises');
+    const ext = path.extname(filePath).toLowerCase();
+
+    const mime =
+        ext === '.jpg' || ext === '.jpeg'
+            ? 'image/jpeg'
+            : ext === '.webp'
+                ? 'image/webp'
+                : ext === '.png'
+                    ? 'image/png'
+                    : 'application/octet-stream';
+
+    try {
+        const data = await fs.readFile(filePath);
+
+        return new Response(data, {
+            headers: {
+                'content-type': mime
+            }
+        });
+    } catch {
+        return new Response('File not found', {status: 404});
+    }
+}
+
 app.whenReady().then(() => {
     ipcMain.handle('app:get-version', () => app.getVersion());
 
@@ -45,8 +85,32 @@ app.whenReady().then(() => {
     registerAssetIpc();
     registerTextureIpc();
     registerAssetPatcherIpc();
-    createMainWindow();
+    registerAssetPackIpc();
 
+    protocol.handle('hexx-resource', async (request) => {
+        const url = new URL(request.url);
+
+        const host = url.hostname;
+        const rawPath = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+
+        let filePath = '';
+
+        if (host === 'preview') {
+            filePath = path.join(process.cwd(), rawPath);
+        }
+
+        if (host === 'asset-pack') {
+            filePath = path.join(process.cwd(), 'storage', 'asset_packs', rawPath);
+        }
+
+        if (!filePath) {
+            return new Response('Invalid hexx-resource path', {status: 400});
+        }
+
+        return protocolHandleFile(filePath);
+    });
+
+    createMainWindow();
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

@@ -70,3 +70,13 @@ HexX_Forge_Unity/
 - CLI/AI 도구가 작업할 때도 위 문서 확인 → 구현 → 문서 갱신 순서를 따른다.
 
 ---
+### Asset Manager 진행 상태
+
+- Asset Manager 기본 페이지 생성
+- 백업 상태 표시
+- 폰트/어셋 백업 실행 UI
+- 원본 카탈로그 기반 텍스처 선택 UI
+- 원본/변경 이미지 좌우 미리보기 UI
+- 변경 이미지 직접 선택 기능
+- Python AssetManager API 계약 확인
+- Electron → AssetManager_UnityPy.exe 실행 구조 설계
