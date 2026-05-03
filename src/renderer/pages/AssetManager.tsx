@@ -33,6 +33,9 @@ type AssetCatalogItem = {
     label: string;
     textureName: string;
     pathId: number;
+    category?: string;
+    option2?: string;
+    size?: [number, number];
     previewUrl: string;
 };
 
@@ -55,6 +58,7 @@ type AssetPackTarget = {
     pngUrl: string;
     previewPath: string;
     previewUrl: string;
+    size?: [number, number];
 };
 
 type AssetPack = {
@@ -137,10 +141,59 @@ function formatCatalogType(value: string): string {
     return toKoreanCategory(value);
 }
 
+function formatCatalogItemLabel(item: AssetCatalogItem): string {
+    const genderLabel = toKoreanGender(item.gender);
+    const categoryLabel = toKoreanCategory(item.type);
+    const rawLabel = item.label?.trim() || '';
+
+    // ✅ 원본 catalog에는 option2가 없으므로 label에서 성별/종류/textureName을 제거해 option2에 가까운 표시명을 만든다.
+    const cleanedLabel = rawLabel
+        .replace(genderLabel, '')
+        .replace(categoryLabel, '')
+        .replace(item.textureName, '')
+        .trim();
+
+    const optionLabel = cleanedLabel || item.textureName || rawLabel;
+
+    return [optionLabel, genderLabel, categoryLabel].filter(Boolean).join(' ');
+}
+
 function formatPackCaption(target?: AssetPackTargetOption): string {
     if (!target) return '';
 
     return `${target.packName}: ${formatTargetLabel(target)}`;
+}
+
+function buildPatchTargetFromPackTarget(target: AssetPackTargetOption) {
+    return {
+        catalogId: target.catalogId,
+        packId: target.packId,
+        targetId: target.id,
+        category: target.category,
+        option1: target.gender,
+        gender: target.gender,
+        option2: target.option2,
+        textureName: target.textureName,
+        pathID: target.pathId,
+        pathId: target.pathId,
+        size: target.size,
+        pngPath: target.pngPath
+    };
+}
+
+function buildPatchTargetFromCatalogItem(item: AssetCatalogItem, pngPath: string) {
+    return {
+        catalogId: item.id,
+        category: item.category || item.type,
+        option1: item.gender,
+        gender: item.gender,
+        option2: item.option2 || item.label,
+        textureName: item.textureName,
+        pathID: item.pathId,
+        pathId: item.pathId,
+        size: item.size,
+        pngPath
+    };
 }
 
 const selectSx = {
@@ -438,19 +491,75 @@ export default function AssetManager() {
                 return;
             }
 
+            const target = changeMode === 'pack' && selectedTarget
+                ? buildPatchTargetFromPackTarget(selectedTarget)
+                : buildPatchTargetFromCatalogItem(selectedItem, replacementPath);
+
             await window.electronAPI.runClothesPatch({
-                textureName: selectedItem.textureName,
-                pathId: selectedItem.pathId,
-                pngPath: replacementPath,
-                gender: selectedItem.gender,
-                category: selectedTarget?.category || selectedItem.type,
-                option2: selectedTarget?.option2 || selectedItem.label,
-                gamePath: settings.gamePath
+                mode: 'single',
+                gameId: 'LongYinLiZhiZhuan',
+                gamePath: settings.gamePath,
+                dryRun: false,
+                stopOnError: true,
+                targets: [target]
             });
 
             setMessage('패치가 완료되었습니다.');
         } catch (err) {
             setError(err instanceof Error ? err.message : '패치 실패');
+        } finally {
+            setApplying(false);
+        }
+    };
+
+    const handleApplyPackAll = async () => {
+        try {
+            setMessage('');
+            setError('');
+
+            if (!selectedPack) {
+                setError('전체 적용할 의상팩을 먼저 선택하세요.');
+                return;
+            }
+
+            if (!selectedPack.targets.length) {
+                setError('선택한 의상팩에 적용할 target이 없습니다.');
+                return;
+            }
+
+            const confirmed = window.confirm(
+                `${selectedPack.packName}의 모든 target ${selectedPack.targets.length}개를 적용하시겠습니까?`
+            );
+
+            if (!confirmed) return;
+
+            setApplying(true);
+
+            const settings = await window.electronAPI.getSettings();
+
+            if (!settings.gamePath) {
+                setError('게임 경로가 설정되지 않았습니다.');
+                return;
+            }
+
+            const targets = selectedPack.targets.map((target) => buildPatchTargetFromPackTarget({
+                ...target,
+                packId: selectedPack.packId,
+                packName: selectedPack.packName
+            }));
+
+            await window.electronAPI.runClothesPatch({
+                mode: 'pack_all',
+                gameId: 'LongYinLiZhiZhuan',
+                gamePath: settings.gamePath,
+                dryRun: false,
+                stopOnError: true,
+                targets
+            });
+
+            setMessage(`팩 전체 적용이 완료되었습니다. (${targets.length}개)`);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '팩 전체 적용 실패');
         } finally {
             setApplying(false);
         }
@@ -592,7 +701,7 @@ export default function AssetManager() {
                                 <MenuItem value="">선택 안 함</MenuItem>
                                 {filteredItems.map((item: AssetCatalogItem) => (
                                     <MenuItem key={item.id} value={item.id}>
-                                        {item.label}
+                                        {formatCatalogItemLabel(item)}
                                     </MenuItem>
                                 ))}
                             </Select>
@@ -741,7 +850,7 @@ export default function AssetManager() {
                             title="원본 미리보기"
                             imageUrl={selectedItem?.previewUrl || ''}
                             emptyText="원본 텍스처를 선택하세요."
-                            caption={selectedItem ? selectedItem.label : ''}
+                            caption={selectedItem ? formatCatalogItemLabel(selectedItem) : ''}
                         />
 
                         <PreviewCard
@@ -774,23 +883,44 @@ export default function AssetManager() {
                         </Box>
                     )}
 
-                    <Button
-                        variant="contained"
-                        disabled={!selectedItem || !replacementPath || applying}
-                        onClick={handleApplyPatch}
-                        sx={{
-                            mt: 2,
-                            background: 'var(--button-bg-color)',
-                            color: 'var(--button-text-color)',
-                            '&:hover': { background: 'var(--button-hover-bg-color)' },
-                            '&.Mui-disabled': {
-                                background: 'var(--secondary-color)',
-                                color: 'var(--text-color-light)'
-                            }
-                        }}
-                    >
-                        적용
-                    </Button>
+                    <Stack direction="row" spacing={2} sx={{ mt: 2, flexWrap: 'wrap', rowGap: 1 }}>
+                        <Button
+                            variant="contained"
+                            disabled={!selectedItem || !replacementPath || applying}
+                            onClick={handleApplyPatch}
+                            sx={{
+                                background: 'var(--button-bg-color)',
+                                color: 'var(--button-text-color)',
+                                '&:hover': { background: 'var(--button-hover-bg-color)' },
+                                '&.Mui-disabled': {
+                                    background: 'var(--secondary-color)',
+                                    color: 'var(--text-color-light)'
+                                }
+                            }}
+                        >
+                            적용
+                        </Button>
+
+                        <Button
+                            variant="outlined"
+                            disabled={!selectedPack || !selectedPack.targets.length || applying}
+                            onClick={handleApplyPackAll}
+                            sx={{
+                                borderColor: 'var(--border-color)',
+                                color: 'var(--text-color)',
+                                '&:hover': {
+                                    background: 'var(--hover-bg-color)',
+                                    borderColor: 'var(--border-color)'
+                                },
+                                '&.Mui-disabled': {
+                                    borderColor: 'var(--secondary-color)',
+                                    color: 'var(--text-color-light)'
+                                }
+                            }}
+                        >
+                            팩 전체 적용
+                        </Button>
+                    </Stack>
                 </Paper>
             </Paper>
 
