@@ -1,14 +1,20 @@
 // src/renderer/pages/AssetManager.tsx
+// Asset 백업, 원본 텍스처 선택, 의상팩/직접 이미지 기반 텍스처 교체 UI입니다.
 
 import { useEffect, useMemo, useState } from 'react';
 import {
     Box,
     Button,
     Checkbox,
+    Divider,
     FormControl,
+    FormControlLabel,
     InputLabel,
+    LinearProgress,
     MenuItem,
     Paper,
+    Radio,
+    RadioGroup,
     Select,
     Stack,
     Typography
@@ -61,6 +67,30 @@ type AssetPack = {
     targets: AssetPackTarget[];
 };
 
+type AssetPackTargetOption = AssetPackTarget & {
+    packId: string;
+    packName: string;
+};
+
+type ChangeMode = 'pack' | 'direct';
+
+const CUSTOM_PACK_VALUE = '__custom__';
+
+const genderLabelMap: Record<string, string> = {
+    female: '여성',
+    male: '남성'
+};
+
+const categoryLabelMap: Record<string, string> = {
+    outfit: '의상',
+    clothing: '의상',
+    clothes: '의상',
+    body: '몸',
+    face: '얼굴',
+    hair: '헤어',
+    building: '건물'
+};
+
 function normalizePacks(value: unknown): AssetPack[] {
     if (Array.isArray(value)) {
         return value as AssetPack[];
@@ -87,6 +117,32 @@ function normalizePacks(value: unknown): AssetPack[] {
     return [];
 }
 
+function toKoreanGender(value: string): string {
+    return genderLabelMap[value] || value || '성별 미지정';
+}
+
+function toKoreanCategory(value: string): string {
+    return categoryLabelMap[value] || value || '종류 미지정';
+}
+
+function formatTargetLabel(target: Pick<AssetPackTarget, 'option2' | 'gender' | 'category'>): string {
+    const optionLabel = target.option2?.trim();
+    const genderLabel = toKoreanGender(target.gender);
+    const categoryLabel = toKoreanCategory(target.category);
+
+    return [optionLabel, genderLabel, categoryLabel].filter(Boolean).join(' ');
+}
+
+function formatCatalogType(value: string): string {
+    return toKoreanCategory(value);
+}
+
+function formatPackCaption(target?: AssetPackTargetOption): string {
+    if (!target) return '';
+
+    return `${target.packName}: ${formatTargetLabel(target)}`;
+}
+
 const selectSx = {
     color: 'var(--text-color)',
     background: 'var(--input-bg-color)',
@@ -99,6 +155,23 @@ const selectSx = {
     '&.Mui-disabled': {
         color: 'var(--text-color-light)'
     }
+};
+
+const sectionPaperSx = {
+    mt: 3,
+    p: 3,
+    background: 'var(--sidebar-bg-color)',
+    color: 'var(--text-color)',
+    border: '1px solid var(--border-color)',
+    boxShadow: 'var(--shadow-small)'
+};
+
+const innerPaperSx = {
+    mt: 2,
+    p: 2,
+    background: 'var(--bg-color)',
+    border: '1px solid var(--border-color)',
+    boxShadow: 'none'
 };
 
 export default function AssetManager() {
@@ -116,20 +189,27 @@ export default function AssetManager() {
     const [selectedGender, setSelectedGender] = useState('');
     const [selectedItemId, setSelectedItemId] = useState('');
 
-    const [replacementUrl, setReplacementUrl] = useState('');
-    const [replacementPath, setReplacementPath] = useState('');
-
     const [packs, setPacks] = useState<AssetPack[]>([]);
     const [selectedPackId, setSelectedPackId] = useState('');
     const [selectedTargetId, setSelectedTargetId] = useState('');
 
+    const [replacementPath, setReplacementPath] = useState('');
+    const [replacementUrl, setReplacementUrl] = useState('');
+    const [changeMode, setChangeMode] = useState<ChangeMode>('pack');
+
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
-
+    const [applying, setApplying] = useState(false);
 
     const loadStatus = async () => {
         const nextStatus = await window.electronAPI.getAssetStatus();
         setStatus(nextStatus);
+    };
+
+    const loadPacks = async () => {
+        const result = await window.electronAPI.getAssetPacks();
+        const normalized = normalizePacks(result);
+        setPacks(normalized);
     };
 
     useEffect(() => {
@@ -137,14 +217,7 @@ export default function AssetManager() {
             setError(err instanceof Error ? err.message : '백업 상태 로드 실패');
         });
 
-        window.electronAPI.getAssetPacks().then((result) => {
-            const normalized = normalizePacks(result);
-            setPacks(normalized);
-
-            if (normalized.length > 0) {
-                setSelectedPackId(normalized[0].packId || '');
-            }
-        }).catch((err) => {
+        loadPacks().catch((err) => {
             setError(err instanceof Error ? err.message : '의상팩 목록 로드 실패');
         });
     }, []);
@@ -174,10 +247,51 @@ export default function AssetManager() {
         return packs.find((pack) => pack.packId === selectedPackId);
     }, [packs, selectedPackId]);
 
+    const allPackTargets = useMemo<AssetPackTargetOption[]>(() => {
+        return packs.flatMap((pack) =>
+            pack.targets.map((target) => ({
+                ...target,
+                packId: pack.packId,
+                packName: pack.packName
+            }))
+        );
+    }, [packs]);
+
+    const availablePackTargets = useMemo<AssetPackTargetOption[]>(() => {
+        return allPackTargets.filter((target) => {
+            const matchPack = !selectedPackId || target.packId === selectedPackId;
+            const matchCatalog = !selectedItem || target.catalogId === selectedItem.id;
+
+            return matchPack && matchCatalog;
+        });
+    }, [allPackTargets, selectedItem, selectedPackId]);
+
     const selectedTarget = useMemo(() => {
-        if (!selectedPack) return undefined;
-        return selectedPack.targets.find((target) => target.id === selectedTargetId);
-    }, [selectedPack, selectedTargetId]);
+        return allPackTargets.find((target) => target.id === selectedTargetId);
+    }, [allPackTargets, selectedTargetId]);
+
+    const packSelectValue = changeMode === 'direct' && replacementPath
+        ? CUSTOM_PACK_VALUE
+        : selectedPackId || '';
+
+    const replacementCaption = useMemo(() => {
+        if (changeMode === 'direct' && replacementPath) {
+            return `커스텀: ${replacementPath}`;
+        }
+
+        return formatPackCaption(selectedTarget);
+    }, [changeMode, replacementPath, selectedTarget]);
+
+    useEffect(() => {
+        if (changeMode !== 'pack') return;
+        if (!selectedTarget) return;
+        if (!selectedItem) return;
+        if (selectedTarget.catalogId === selectedItem.id) return;
+
+        setSelectedTargetId('');
+        setReplacementPath('');
+        setReplacementUrl('');
+    }, [changeMode, selectedItem, selectedTarget]);
 
     const handleBackup = async () => {
         try {
@@ -208,9 +322,12 @@ export default function AssetManager() {
 
             if (!result) return;
 
+            setChangeMode('direct');
+            setSelectedPackId('');
+            setSelectedTargetId('');
             setReplacementPath(result.path || '');
             setReplacementUrl(result.url || '');
-            setSelectedTargetId('');
+            setMessage('직접 선택 이미지가 변경 미리보기에 적용되었습니다.');
         } catch (err) {
             setError(err instanceof Error ? err.message : '변경 이미지 선택 실패');
         }
@@ -233,14 +350,28 @@ export default function AssetManager() {
             const firstPack = normalized[0];
 
             if (firstPack) {
+                setChangeMode('pack');
                 setSelectedPackId(firstPack.packId || '');
                 setSelectedTargetId('');
+                setReplacementPath('');
+                setReplacementUrl('');
                 setMessage(`의상팩을 등록했습니다: ${firstPack.packName}`);
             } else {
                 setMessage('의상팩을 등록했지만 표시할 팩이 없습니다.');
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : '의상팩 등록 실패');
+        }
+    };
+
+    const handleSelectItem = (itemId: string) => {
+        const nextItemId = itemId || '';
+        setSelectedItemId(nextItemId);
+
+        if (changeMode === 'pack') {
+            setSelectedTargetId('');
+            setReplacementPath('');
+            setReplacementUrl('');
         }
     };
 
@@ -256,7 +387,7 @@ export default function AssetManager() {
             return;
         }
 
-        const target = selectedPack?.targets.find((item) => item.id === safeTargetId);
+        const target = allPackTargets.find((item) => item.id === safeTargetId);
 
         if (!target) {
             setError(`팩 대상을 찾지 못했습니다: ${safeTargetId}`);
@@ -276,12 +407,11 @@ export default function AssetManager() {
             setError(`카탈로그 항목을 찾지 못했습니다: ${target.catalogId}`);
         }
 
+        setChangeMode('pack');
+        setSelectedPackId(target.packId || '');
         setReplacementPath(target.pngPath || '');
-        setReplacementUrl(
-            target.previewUrl || target.pngUrl || matchedCatalog?.previewUrl || ''
-        );
-
-        setMessage(`팩 대상 선택됨: ${target.textureName}`);
+        setReplacementUrl(target.previewUrl || target.pngUrl || matchedCatalog?.previewUrl || '');
+        setMessage(`팩 대상 선택됨: ${formatTargetLabel(target)}`);
     };
 
     const handleApplyPatch = async () => {
@@ -299,6 +429,8 @@ export default function AssetManager() {
                 return;
             }
 
+            setApplying(true);
+
             const settings = await window.electronAPI.getSettings();
 
             if (!settings.gamePath) {
@@ -311,14 +443,16 @@ export default function AssetManager() {
                 pathId: selectedItem.pathId,
                 pngPath: replacementPath,
                 gender: selectedItem.gender,
-                category: selectedTarget?.category || 'clothes',
-                option2: selectedTarget?.option2 || selectedItem.type,
+                category: selectedTarget?.category || selectedItem.type,
+                option2: selectedTarget?.option2 || selectedItem.label,
                 gamePath: settings.gamePath
             });
 
             setMessage('패치가 완료되었습니다.');
         } catch (err) {
             setError(err instanceof Error ? err.message : '패치 실패');
+        } finally {
+            setApplying(false);
         }
     };
 
@@ -328,16 +462,7 @@ export default function AssetManager() {
                 어셋 관리자
             </Typography>
 
-            <Paper
-                sx={{
-                    mt: 3,
-                    p: 3,
-                    background: 'var(--sidebar-bg-color)',
-                    color: 'var(--text-color)',
-                    border: '1px solid var(--border-color)',
-                    boxShadow: 'var(--shadow-small)'
-                }}
-            >
+            <Paper sx={sectionPaperSx}>
                 <Typography variant="h6" sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
                     백업 상태
                 </Typography>
@@ -386,7 +511,8 @@ export default function AssetManager() {
                         onClick={handleBackup}
                         sx={{
                             background: 'var(--button-bg-color)',
-                            color: 'var(--button-text-color)'
+                            color: 'var(--button-text-color)',
+                            '&:hover': { background: 'var(--button-hover-bg-color)' }
                         }}
                     >
                         백업하기
@@ -404,46 +530,148 @@ export default function AssetManager() {
                 </Stack>
             </Paper>
 
-            <Paper
-                sx={{
-                    mt: 4,
-                    p: 3,
-                    background: 'var(--sidebar-bg-color)',
-                    color: 'var(--text-color)',
-                    border: '1px solid var(--border-color)',
-                    boxShadow: 'var(--shadow-small)'
-                }}
-            >
+            <Paper sx={{ ...sectionPaperSx, mt: 4 }}>
                 <Typography variant="h6" sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
-                    텍스처 미리보기 비교
+                    텍스처 교체 작업
                 </Typography>
 
-                <Paper
-                    sx={{
-                        mt: 3,
-                        p: 2,
-                        background: 'var(--bg-color)',
-                        border: '1px solid var(--border-color)',
-                        boxShadow: 'none'
-                    }}
-                >
+                <Paper sx={innerPaperSx}>
                     <Typography sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
-                        의상팩
+                        원본 대상 선택
                     </Typography>
 
                     <Stack direction="row" spacing={2} sx={{ mt: 2, flexWrap: 'wrap', rowGap: 2 }}>
-                        <FormControl size="small" sx={{ minWidth: 260 }}>
-                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>팩 선택</InputLabel>
+                        <FormControl size="small" sx={{ minWidth: 180 }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>종류</InputLabel>
                             <Select
-                                value={selectedPackId || ''}
-                                label="팩 선택"
+                                value={selectedType || ''}
+                                label="종류"
                                 onChange={(e) => {
-                                    setSelectedPackId(String(e.target.value || ''));
-                                    setSelectedTargetId('');
+                                    setSelectedType(String(e.target.value || ''));
+                                    handleSelectItem('');
                                 }}
                                 sx={selectSx}
                             >
+                                <MenuItem value="">전체</MenuItem>
+                                {types.map((itemType) => (
+                                    <MenuItem key={itemType} value={itemType}>
+                                        {formatCatalogType(itemType)}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+
+                        <FormControl size="small" sx={{ minWidth: 180 }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>성별</InputLabel>
+                            <Select
+                                value={selectedGender || ''}
+                                label="성별"
+                                onChange={(e) => {
+                                    setSelectedGender(String(e.target.value || ''));
+                                    handleSelectItem('');
+                                }}
+                                sx={selectSx}
+                            >
+                                <MenuItem value="">전체</MenuItem>
+                                {genders.map((itemGender) => (
+                                    <MenuItem key={itemGender} value={itemGender}>
+                                        {toKoreanGender(itemGender)}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+
+                        <FormControl size="small" sx={{ minWidth: 320 }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>원본 텍스처</InputLabel>
+                            <Select
+                                value={selectedItemId || ''}
+                                label="원본 텍스처"
+                                onChange={(e) => handleSelectItem(String(e.target.value || ''))}
+                                sx={selectSx}
+                            >
                                 <MenuItem value="">선택 안 함</MenuItem>
+                                {filteredItems.map((item: AssetCatalogItem) => (
+                                    <MenuItem key={item.id} value={item.id}>
+                                        {item.label}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                    </Stack>
+
+                    {loading && (
+                        <Typography sx={{ mt: 2, color: 'var(--text-color-light)' }}>
+                            카탈로그를 불러오는 중입니다.
+                        </Typography>
+                    )}
+                </Paper>
+
+                <Paper sx={innerPaperSx}>
+                    <Typography sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
+                        변경 방식 선택
+                    </Typography>
+
+                    <RadioGroup
+                        row
+                        value={changeMode}
+                        onChange={(e) => {
+                            const nextMode = e.target.value as ChangeMode;
+                            setChangeMode(nextMode);
+
+                            if (nextMode === 'pack') {
+                                setReplacementPath('');
+                                setReplacementUrl('');
+                            } else {
+                                setSelectedPackId('');
+                                setSelectedTargetId('');
+                            }
+                        }}
+                        sx={{ mt: 1 }}
+                    >
+                        <FormControlLabel
+                            value="pack"
+                            control={<Radio sx={{ color: 'var(--text-color-light)', '&.Mui-checked': { color: 'var(--primary-color)' } }} />}
+                            label="의상팩 사용"
+                            sx={{ color: 'var(--text-color)' }}
+                        />
+                        <FormControlLabel
+                            value="direct"
+                            control={<Radio sx={{ color: 'var(--text-color-light)', '&.Mui-checked': { color: 'var(--primary-color)' } }} />}
+                            label="직접 이미지 선택"
+                            sx={{ color: 'var(--text-color)' }}
+                        />
+                    </RadioGroup>
+
+                    <Divider sx={{ my: 2, borderColor: 'var(--border-color)' }} />
+
+                    <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', rowGap: 2, alignItems: 'center' }}>
+                        <FormControl size="small" sx={{ minWidth: 260 }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>팩 선택</InputLabel>
+                            <Select
+                                value={packSelectValue}
+                                label="팩 선택"
+                                onChange={(e) => {
+                                    const nextPackId = String(e.target.value || '');
+
+                                    if (nextPackId === CUSTOM_PACK_VALUE) {
+                                        setChangeMode('direct');
+                                        setSelectedPackId('');
+                                        setSelectedTargetId('');
+                                        return;
+                                    }
+
+                                    setChangeMode('pack');
+                                    setSelectedPackId(nextPackId);
+                                    setSelectedTargetId('');
+                                    setReplacementPath('');
+                                    setReplacementUrl('');
+                                }}
+                                sx={selectSx}
+                            >
+                                <MenuItem value="">전체</MenuItem>
+                                {replacementPath && (
+                                    <MenuItem value={CUSTOM_PACK_VALUE}>커스텀</MenuItem>
+                                )}
                                 {packs.map((pack) => (
                                     <MenuItem key={pack.packId} value={pack.packId}>
                                         {pack.packName}
@@ -452,19 +680,19 @@ export default function AssetManager() {
                             </Select>
                         </FormControl>
 
-                        <FormControl size="small" sx={{ minWidth: 340 }}>
-                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>팩 대상</InputLabel>
+                        <FormControl size="small" sx={{ minWidth: 360 }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>적용 대상</InputLabel>
                             <Select
                                 value={selectedTargetId || ''}
-                                label="팩 대상"
-                                disabled={!selectedPack}
+                                label="적용 대상"
+                                disabled={changeMode !== 'pack'}
                                 onChange={(e) => handleSelectPackTarget(String(e.target.value || ''))}
                                 sx={selectSx}
                             >
                                 <MenuItem value="">선택 안 함</MenuItem>
-                                {(selectedPack?.targets || []).map((target) => (
+                                {availablePackTargets.map((target) => (
                                     <MenuItem key={target.id} value={target.id}>
-                                        {target.gender} / {target.option2} / {target.textureName}
+                                        {formatTargetLabel(target)}
                                     </MenuItem>
                                 ))}
                             </Select>
@@ -475,14 +703,27 @@ export default function AssetManager() {
                             onClick={handleImportPack}
                             sx={{
                                 background: 'var(--button-bg-color)',
-                                color: 'var(--button-text-color)'
+                                color: 'var(--button-text-color)',
+                                '&:hover': { background: 'var(--button-hover-bg-color)' }
                             }}
                         >
                             의상팩 추가
                         </Button>
+
+                        <Button
+                            variant="contained"
+                            onClick={handleSelectReplacement}
+                            sx={{
+                                background: 'var(--button-bg-color)',
+                                color: 'var(--button-text-color)',
+                                '&:hover': { background: 'var(--button-hover-bg-color)' }
+                            }}
+                        >
+                            변경 이미지 직접 선택
+                        </Button>
                     </Stack>
 
-                    {selectedPack && (
+                    {selectedPack && changeMode === 'pack' && (
                         <Typography sx={{ mt: 2, color: 'var(--text-color-light)' }}>
                             {selectedPack.author ? `${selectedPack.author} · ` : ''}
                             {selectedPack.description || '설명 없음'}
@@ -490,82 +731,58 @@ export default function AssetManager() {
                     )}
                 </Paper>
 
-                <Stack direction="row" spacing={2} sx={{ mt: 3, flexWrap: 'wrap', rowGap: 2 }}>
-                    <FormControl size="small" sx={{ minWidth: 180 }}>
-                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>종류</InputLabel>
-                        <Select
-                            value={selectedType || ''}
-                            label="종류"
-                            onChange={(e) => {
-                                setSelectedType(String(e.target.value || ''));
-                                setSelectedItemId('');
-                            }}
-                            sx={selectSx}
-                        >
-                            <MenuItem value="">전체</MenuItem>
-                            {types.map((itemType) => (
-                                <MenuItem key={itemType} value={itemType}>
-                                    {itemType}
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
+                <Paper sx={innerPaperSx}>
+                    <Typography sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
+                        미리보기
+                    </Typography>
 
-                    <FormControl size="small" sx={{ minWidth: 180 }}>
-                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>성별</InputLabel>
-                        <Select
-                            value={selectedGender || ''}
-                            label="성별"
-                            onChange={(e) => {
-                                setSelectedGender(String(e.target.value || ''));
-                                setSelectedItemId('');
-                            }}
-                            sx={selectSx}
-                        >
-                            <MenuItem value="">전체</MenuItem>
-                            {genders.map((itemGender) => (
-                                <MenuItem key={itemGender} value={itemGender}>
-                                    {itemGender}
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
+                    <Stack direction="row" spacing={3} sx={{ mt: 2, flexWrap: 'wrap', rowGap: 3 }}>
+                        <PreviewCard
+                            title="원본 미리보기"
+                            imageUrl={selectedItem?.previewUrl || ''}
+                            emptyText="원본 텍스처를 선택하세요."
+                            caption={selectedItem ? selectedItem.label : ''}
+                        />
 
-                    <FormControl size="small" sx={{ minWidth: 300 }}>
-                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>원본 텍스처</InputLabel>
-                        <Select
-                            value={selectedItemId || ''}
-                            label="원본 텍스처"
-                            onChange={(e) => setSelectedItemId(String(e.target.value || ''))}
-                            sx={selectSx}
-                        >
-                            <MenuItem value="">선택 안 함</MenuItem>
-                            {filteredItems.map((item: AssetCatalogItem) => (
-                                <MenuItem key={item.id} value={item.id}>
-                                    {item.label}
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
+                        <PreviewCard
+                            title="변경 미리보기"
+                            imageUrl={replacementUrl}
+                            emptyText="의상팩 대상 또는 직접 이미지를 선택하세요."
+                            caption={replacementCaption}
+                        />
+                    </Stack>
+                </Paper>
+
+                <Paper sx={innerPaperSx}>
+                    <Typography sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
+                        적용
+                    </Typography>
+
+                    {applying && (
+                        <Box sx={{ mt: 2 }}>
+                            <LinearProgress
+                                sx={{
+                                    backgroundColor: 'var(--input-bg-color)',
+                                    '& .MuiLinearProgress-bar': {
+                                        backgroundColor: 'var(--primary-color)'
+                                    }
+                                }}
+                            />
+                            <Typography sx={{ mt: 1, color: 'var(--text-color-light)' }}>
+                                패치를 적용하는 중입니다.
+                            </Typography>
+                        </Box>
+                    )}
 
                     <Button
                         variant="contained"
-                        onClick={handleSelectReplacement}
-                        sx={{
-                            background: 'var(--button-bg-color)',
-                            color: 'var(--button-text-color)'
-                        }}
-                    >
-                        변경 이미지 직접 선택
-                    </Button>
-
-                    <Button
-                        variant="contained"
-                        disabled={!selectedItem || !replacementPath}
+                        disabled={!selectedItem || !replacementPath || applying}
                         onClick={handleApplyPatch}
                         sx={{
+                            mt: 2,
                             background: 'var(--button-bg-color)',
                             color: 'var(--button-text-color)',
+                            '&:hover': { background: 'var(--button-hover-bg-color)' },
                             '&.Mui-disabled': {
                                 background: 'var(--secondary-color)',
                                 color: 'var(--text-color-light)'
@@ -574,40 +791,11 @@ export default function AssetManager() {
                     >
                         적용
                     </Button>
-                </Stack>
-
-                {loading && (
-                    <Typography sx={{ mt: 2, color: 'var(--text-color-light)' }}>
-                        카탈로그를 불러오는 중입니다.
-                    </Typography>
-                )}
-
-                <Stack direction="row" spacing={3} sx={{ mt: 3, flexWrap: 'wrap', rowGap: 3 }}>
-                    <PreviewCard
-                        title="원본 미리보기"
-                        imageUrl={selectedItem?.previewUrl || ''}
-                        emptyText="원본 텍스처를 선택하세요."
-                    />
-
-                    <PreviewCard
-                        title="변경 미리보기"
-                        imageUrl={replacementUrl}
-                        emptyText="변경 이미지를 선택하세요."
-                        caption={replacementPath}
-                    />
-                </Stack>
+                </Paper>
             </Paper>
 
             {(message || error) && (
-                <Paper
-                    sx={{
-                        mt: 3,
-                        p: 2,
-                        background: 'var(--sidebar-bg-color)',
-                        border: '1px solid var(--border-color)',
-                        boxShadow: 'var(--shadow-small)'
-                    }}
-                >
+                <Paper sx={sectionPaperSx}>
                     {message && (
                         <Typography sx={{ color: 'var(--primary-color)' }}>
                             {message}
@@ -673,7 +861,9 @@ function PreviewCard({
                         justifyContent: 'center',
                         border: '1px dashed var(--border-color)',
                         borderRadius: 1,
-                        color: 'var(--text-color-light)'
+                        color: 'var(--text-color-light)',
+                        textAlign: 'center',
+                        px: 2
                     }}
                 >
                     {emptyText}

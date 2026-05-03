@@ -4,7 +4,6 @@
 import AdmZip from 'adm-zip';
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 const ROOT_DIR = process.cwd();
 const PACK_ROOT = path.join(ROOT_DIR, 'storage', 'asset_packs');
@@ -52,10 +51,6 @@ function sanitizeId(value: string): string {
     return value.replace(/[\\/:*?"<>|]/g, '_').trim();
 }
 
-function toFileUrlIfExists(filePath: string): string {
-    return filePath && fs.existsSync(filePath) ? pathToFileURL(filePath).toString() : '';
-}
-
 function toAssetPackProtocolUrl(packId: string, relativePath: string): string {
     const normalizedPackId = packId.replaceAll('\\', '/');
     const normalizedPath = relativePath.replaceAll('\\', '/');
@@ -71,6 +66,7 @@ function readPackFromDir(packDir: string): AssetPack | null {
     }
 
     const raw = JSON.parse(fs.readFileSync(packJsonPath, 'utf-8')) as AssetPackRaw;
+    const safePackId = sanitizeId(raw.packId);
 
     const targets: AssetPackTarget[] = (raw.targets || []).map((target, index) => {
         const pngPath = path.join(packDir, target.png);
@@ -78,18 +74,19 @@ function readPackFromDir(packDir: string): AssetPack | null {
 
         return {
             ...target,
-            id: `${raw.packId}_${index}_${target.catalogId}`,
+            id: `${safePackId}_${index}_${target.catalogId}`,
             pngPath,
-            pngUrl: fs.existsSync(pngPath) ? toAssetPackProtocolUrl(raw.packId, target.png) : '',
+            pngUrl: fs.existsSync(pngPath) ? toAssetPackProtocolUrl(safePackId, target.png) : '',
             previewPath,
             previewUrl: target.preview && fs.existsSync(previewPath)
-                ? toAssetPackProtocolUrl(raw.packId, target.preview)
+                ? toAssetPackProtocolUrl(safePackId, target.preview)
                 : ''
         };
     });
 
     return {
         ...raw,
+        packId: safePackId,
         basePath: packDir,
         targets
     };

@@ -3,8 +3,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import {getAppSettings, readJsonFile} from './configService';
-import {pathToFileURL} from 'node:url';
+import { getAppSettings, readJsonFile } from './configService';
 
 const ROOT_DIR = process.cwd();
 const CONFIG_PATH = path.join(ROOT_DIR, 'config', 'asset_config.json');
@@ -33,32 +32,30 @@ function toPreviewProtocolUrl(relativePath: string): string {
     return `hexx-resource://preview/${encodeURIComponent(normalized).replaceAll('%2F', '/')}`;
 }
 
+function toSelectedImageProtocolUrl(filePath: string): string {
+    return `hexx-resource://selected-image/?path=${encodeURIComponent(filePath)}`;
+}
+
 export function getAssetCatalog() {
     const catalog = readJsonFile<{ items: AssetCatalogItem[] }>(ASSET_CATALOG_PATH, {
         items: []
     });
 
     return {
-        items: catalog.items.map((item) => {
-            const previewPath = item.preview ? path.join(ROOT_DIR, item.preview) : '';
-
-            return {
-                ...item,
-                previewUrl: item.preview ? toPreviewProtocolUrl(item.preview) : ''
-            };
-        })
+        items: catalog.items.map((item) => ({
+            ...item,
+            previewUrl: item.preview ? toPreviewProtocolUrl(item.preview) : ''
+        }))
     };
 }
 
 export async function selectReplacementImage() {
-    const {dialog} = await import('electron');
+    const { dialog } = await import('electron');
 
     const result = await dialog.showOpenDialog({
         title: '변경 PNG 또는 미리보기 이미지 선택',
         properties: ['openFile'],
-        filters: [
-            {name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp']}
-        ]
+        filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
     });
 
     if (result.canceled || result.filePaths.length === 0) {
@@ -69,13 +66,13 @@ export async function selectReplacementImage() {
 
     return {
         path: filePath,
-        url: pathToFileURL(filePath).toString()
+        url: toSelectedImageProtocolUrl(filePath)
     };
 }
 
 function getConfig(): AssetConfig {
     return readJsonFile<AssetConfig>(CONFIG_PATH, {
-        backupTargets: {font: [], asset: []}
+        backupTargets: { font: [], asset: [] }
     });
 }
 
@@ -86,12 +83,12 @@ function getTimestamp(): string {
 
 function ensureDir(p: string) {
     if (!fs.existsSync(p)) {
-        fs.mkdirSync(p, {recursive: true});
+        fs.mkdirSync(p, { recursive: true });
     }
 }
 
 function getGamePath(): string {
-    const {gamePath} = getAppSettings();
+    const { gamePath } = getAppSettings();
     if (!gamePath) throw new Error('게임 경로가 설정되지 않았습니다.');
     return gamePath;
 }
@@ -119,7 +116,7 @@ export function getTextureCatalog(): TextureItem[] {
         .filter(Boolean)
         .map((row) => {
             const [gender, type, texture_name, pathID] = row.trim().split(',');
-            return {gender, type, texture_name, pathID: Number(pathID)};
+            return { gender, type, texture_name, pathID: Number(pathID) };
         });
 }
 
