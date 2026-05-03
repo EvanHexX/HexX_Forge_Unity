@@ -8,13 +8,22 @@ import path from 'node:path';
 const ROOT_DIR = process.cwd();
 const PACK_ROOT = path.join(ROOT_DIR, 'storage', 'asset_packs');
 
+type SizeTuple = [number, number];
+
 type AssetPackTargetRaw = {
+    /** UI catalog와 연결하기 위한 선택용 id입니다. 실제 패치 최종 기준은 Python data.tsv입니다. */
     catalogId: string;
+    /** API request.category. 예: outfit, body, face */
+    category: string;
+    /** API request.option1. 보통 gender와 동일합니다. */
+    option1?: string;
+    /** gender. 예: female, male */
+    gender: string;
+    /** API request.option2. 예: 천산파, 개방, 캐릭터명 */
+    option2: string;
     textureName: string;
     pathId: number;
-    gender: string;
-    category: string;
-    option2: string;
+    size?: SizeTuple;
     png: string;
     preview?: string;
 };
@@ -58,6 +67,14 @@ function toAssetPackProtocolUrl(packId: string, relativePath: string): string {
     return `hexx-resource://asset-pack/${encodeURIComponent(normalizedPackId).replaceAll('%2F', '/')}/${encodeURIComponent(normalizedPath).replaceAll('%2F', '/')}`;
 }
 
+function requireString(value: unknown, fieldName: string): string {
+    if (typeof value !== 'string' || value.trim() === '') {
+        throw new Error(`pack.json target ${fieldName} 값이 없습니다.`);
+    }
+
+    return value;
+}
+
 function readPackFromDir(packDir: string): AssetPack | null {
     const packJsonPath = path.join(packDir, 'pack.json');
 
@@ -66,27 +83,28 @@ function readPackFromDir(packDir: string): AssetPack | null {
     }
 
     const raw = JSON.parse(fs.readFileSync(packJsonPath, 'utf-8')) as AssetPackRaw;
-    const safePackId = sanitizeId(raw.packId);
 
     const targets: AssetPackTarget[] = (raw.targets || []).map((target, index) => {
-        const pngPath = path.join(packDir, target.png);
+        const png = requireString(target.png, `targets[${index}].png`);
+        const pngPath = path.join(packDir, png);
         const previewPath = target.preview ? path.join(packDir, target.preview) : '';
 
         return {
             ...target,
-            id: `${safePackId}_${index}_${target.catalogId}`,
+            category: target.category || 'outfit',
+            option1: target.option1 || target.gender,
+            id: `${raw.packId}_${index}_${target.catalogId}`,
             pngPath,
-            pngUrl: fs.existsSync(pngPath) ? toAssetPackProtocolUrl(safePackId, target.png) : '',
+            pngUrl: fs.existsSync(pngPath) ? toAssetPackProtocolUrl(raw.packId, png) : '',
             previewPath,
             previewUrl: target.preview && fs.existsSync(previewPath)
-                ? toAssetPackProtocolUrl(safePackId, target.preview)
+                ? toAssetPackProtocolUrl(raw.packId, target.preview)
                 : ''
         };
     });
 
     return {
         ...raw,
-        packId: safePackId,
         basePath: packDir,
         targets
     };
