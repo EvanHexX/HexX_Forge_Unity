@@ -35,13 +35,16 @@ type AssetCatalogItem = {
     pathId: number;
     category?: string;
     option2?: string;
-    size?: [number, number];
+    size?: SizeTuple;
     previewUrl: string;
 };
+
+type SizeTuple = [number, number];
 
 type SelectedImage = {
     path: string;
     url: string;
+    size?: SizeTuple;
 };
 
 type AssetPackTarget = {
@@ -58,7 +61,7 @@ type AssetPackTarget = {
     pngUrl: string;
     previewPath: string;
     previewUrl: string;
-    size?: [number, number];
+    size?: SizeTuple;
 };
 
 type AssetPack = {
@@ -137,23 +140,37 @@ function formatTargetLabel(target: Pick<AssetPackTarget, 'option2' | 'gender' | 
     return [optionLabel, genderLabel, categoryLabel].filter(Boolean).join(' ');
 }
 
+function getCatalogCategory(item: AssetCatalogItem): string {
+    return item.category || item.type || '';
+}
+
+function getCatalogOption2(item: AssetCatalogItem): string {
+    if (item.option2?.trim()) {
+        return item.option2.trim();
+    }
+
+    const genderLabel = toKoreanGender(item.gender);
+    const categoryLabel = toKoreanCategory(getCatalogCategory(item));
+    const rawLabel = item.label?.trim() || '';
+
+    // ✅ legacy asset_catalog.json 보정: label에서 UI 장식어를 제거해 option2 후보를 만든다.
+    // 신규 catalog에서는 반드시 option2를 명시하는 것을 권장한다.
+    return rawLabel
+        .replace(genderLabel, '')
+        .replace(categoryLabel, '')
+        .replace(item.textureName, '')
+        .replace(/원본/g, '')
+        .trim();
+}
+
 function formatCatalogType(value: string): string {
     return toKoreanCategory(value);
 }
 
 function formatCatalogItemLabel(item: AssetCatalogItem): string {
     const genderLabel = toKoreanGender(item.gender);
-    const categoryLabel = toKoreanCategory(item.type);
-    const rawLabel = item.label?.trim() || '';
-
-    // ✅ 원본 catalog에는 option2가 없으므로 label에서 성별/종류/textureName을 제거해 option2에 가까운 표시명을 만든다.
-    const cleanedLabel = rawLabel
-        .replace(genderLabel, '')
-        .replace(categoryLabel, '')
-        .replace(item.textureName, '')
-        .trim();
-
-    const optionLabel = cleanedLabel || item.textureName || rawLabel;
+    const categoryLabel = toKoreanCategory(getCatalogCategory(item));
+    const optionLabel = getCatalogOption2(item) || item.textureName || item.label?.trim() || '';
 
     return [optionLabel, genderLabel, categoryLabel].filter(Boolean).join(' ');
 }
@@ -181,17 +198,19 @@ function buildPatchTargetFromPackTarget(target: AssetPackTargetOption) {
     };
 }
 
-function buildPatchTargetFromCatalogItem(item: AssetCatalogItem, pngPath: string) {
+function buildPatchTargetFromCatalogItem(item: AssetCatalogItem, pngPath: string, replacementSize?: SizeTuple) {
     return {
         catalogId: item.id,
-        category: item.category || item.type,
+        category: getCatalogCategory(item),
         option1: item.gender,
         gender: item.gender,
-        option2: item.option2 || item.label,
+        option2: getCatalogOption2(item),
         textureName: item.textureName,
         pathID: item.pathId,
         pathId: item.pathId,
-        size: item.size,
+        // 직접 선택 PNG는 main process에서 읽은 실제 PNG size를 우선 전달한다.
+        // size 매칭/검증 최종 판단은 AssetManager_UnityPy의 data.tsv 기준 로직에 맡긴다.
+        size: replacementSize || item.size,
         pngPath
     };
 }
@@ -248,6 +267,7 @@ export default function AssetManager() {
 
     const [replacementPath, setReplacementPath] = useState('');
     const [replacementUrl, setReplacementUrl] = useState('');
+    const [replacementSize, setReplacementSize] = useState<SizeTuple | undefined>(undefined);
     const [changeMode, setChangeMode] = useState<ChangeMode>('pack');
 
     const [message, setMessage] = useState('');
@@ -276,7 +296,7 @@ export default function AssetManager() {
     }, []);
 
     const types = useMemo(() => {
-        return [...new Set(catalog.map((item: AssetCatalogItem) => item.type))];
+        return [...new Set(catalog.map((item: AssetCatalogItem) => getCatalogCategory(item)).filter(Boolean))];
     }, [catalog]);
 
     const genders = useMemo(() => {
@@ -286,7 +306,7 @@ export default function AssetManager() {
     const filteredItems = useMemo(() => {
         return catalog.filter((item: AssetCatalogItem) => {
             return (
-                (!selectedType || item.type === selectedType) &&
+                (!selectedType || getCatalogCategory(item) === selectedType) &&
                 (!selectedGender || item.gender === selectedGender)
             );
         });
@@ -344,6 +364,7 @@ export default function AssetManager() {
         setSelectedTargetId('');
         setReplacementPath('');
         setReplacementUrl('');
+        setReplacementSize(undefined);
     }, [changeMode, selectedItem, selectedTarget]);
 
     const handleBackup = async () => {
@@ -380,6 +401,7 @@ export default function AssetManager() {
             setSelectedTargetId('');
             setReplacementPath(result.path || '');
             setReplacementUrl(result.url || '');
+            setReplacementSize(result.size);
             setMessage('직접 선택 이미지가 변경 미리보기에 적용되었습니다.');
         } catch (err) {
             setError(err instanceof Error ? err.message : '변경 이미지 선택 실패');
@@ -425,6 +447,7 @@ export default function AssetManager() {
             setSelectedTargetId('');
             setReplacementPath('');
             setReplacementUrl('');
+            setReplacementSize(undefined);
         }
     };
 
@@ -437,6 +460,7 @@ export default function AssetManager() {
         if (!safeTargetId) {
             setReplacementPath('');
             setReplacementUrl('');
+            setReplacementSize(undefined);
             return;
         }
 
@@ -453,7 +477,7 @@ export default function AssetManager() {
 
         if (matchedCatalog) {
             setSelectedItemId(matchedCatalog.id || '');
-            setSelectedType(matchedCatalog.type || '');
+            setSelectedType(getCatalogCategory(matchedCatalog) || '');
             setSelectedGender(matchedCatalog.gender || '');
         } else {
             setSelectedItemId('');
@@ -464,6 +488,7 @@ export default function AssetManager() {
         setSelectedPackId(target.packId || '');
         setReplacementPath(target.pngPath || '');
         setReplacementUrl(target.previewUrl || target.pngUrl || matchedCatalog?.previewUrl || '');
+        setReplacementSize(target.size);
         setMessage(`팩 대상 선택됨: ${formatTargetLabel(target)}`);
     };
 
@@ -493,7 +518,12 @@ export default function AssetManager() {
 
             const target = changeMode === 'pack' && selectedTarget
                 ? buildPatchTargetFromPackTarget(selectedTarget)
-                : buildPatchTargetFromCatalogItem(selectedItem, replacementPath);
+                : buildPatchTargetFromCatalogItem(selectedItem, replacementPath, replacementSize);
+
+            if (!target.option2) {
+                setError('선택한 원본 텍스처에 option2 값이 없습니다. asset_catalog.json 또는 pack.json을 보강해야 합니다.');
+                return;
+            }
 
             await window.electronAPI.runClothesPatch({
                 mode: 'single',
@@ -547,6 +577,12 @@ export default function AssetManager() {
                 packId: selectedPack.packId,
                 packName: selectedPack.packName
             }));
+
+            const invalidTarget = targets.find((target) => !target.option2 || !target.category || !target.pngPath);
+            if (invalidTarget) {
+                setError('팩 전체 적용 target 중 option2/category/pngPath가 비어 있는 항목이 있습니다. pack.json을 확인해야 합니다.');
+                return;
+            }
 
             await window.electronAPI.runClothesPatch({
                 mode: 'pack_all',
