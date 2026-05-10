@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { app } from 'electron';
 import { getAppSettings } from './configService';
 import { importAssetPack } from './assetPackService';
+import { getResourcePath, getStoragePath } from './runtimePaths';
 
 export { importAssetPack };
 
@@ -78,6 +79,75 @@ type TexturePatchPlan = {
     jobs: TexturePatchJob[];
 };
 
+type FontJobParam = {
+    pathId?: number;
+    path_id?: number;
+    replacementFontFile?: string;
+    replacement_font_file?: string;
+};
+
+type RunFontPatchParams = {
+    gameId?: string;
+    gamePath?: string;
+    dryRun?: boolean;
+    dry_run?: boolean;
+    stopOnError?: boolean;
+    stop_on_error?: boolean;
+    jobs: FontJobParam[];
+};
+
+type RunFontExtractParams = {
+    gameId?: string;
+    gamePath?: string;
+    overwrite?: boolean;
+};
+
+type RunFontListParams = {
+    gameId?: string;
+    gamePath?: string;
+};
+
+type FontExtractPlan = {
+    kind: 'font_extract';
+    game_id: string;
+    font_metadata_path: string;
+    originals_dir: string;
+    assets_file: string;
+    overwrite: boolean;
+};
+
+type FontPatchPlan = {
+    kind: 'font';
+    game_id: string;
+    dry_run: boolean;
+    stop_on_error: boolean;
+    font_metadata_path: string;
+    originals_dir: string;
+    assets_file: string;
+    jobs: Array<{
+        path_id: number;
+        replacement_font_file: string;
+    }>;
+};
+
+type FontRestorePlan = {
+    kind: 'font_restore';
+    game_id: string;
+    dry_run: boolean;
+    stop_on_error: boolean;
+    font_metadata_path: string;
+    originals_dir: string;
+    assets_file: string;
+    jobs: Array<{
+        path_id: number;
+    }>;
+};
+
+type FontListPlan = {
+    kind: 'font_list';
+    assets_file: string;
+};
+
 type PatcherPaths = {
     patcherRoot: string;
     executablePath: string;
@@ -111,36 +181,62 @@ function timestamp(): string {
 }
 
 function getRootCandidates(): string[] {
-    return [
+    const seeds = [
         process.cwd(),
         app.getAppPath(),
         path.dirname(process.execPath),
         process.resourcesPath
     ].filter(Boolean);
+
+    const candidates = new Set<string>();
+
+    for (const seed of seeds) {
+        let current = path.resolve(seed);
+
+        while (true) {
+            candidates.add(current);
+            const parent = path.dirname(current);
+            if (parent === current) break;
+            current = parent;
+        }
+    }
+
+    return [...candidates];
 }
 
 function findPatcherRoot(): string {
     for (const root of getRootCandidates()) {
-        const candidate = path.join(root, 'resources', 'AssetManager');
-        if (fs.existsSync(candidate)) return candidate;
+        const candidates = [
+            path.join(root, 'resources', 'tools', 'AssetManager'),
+            path.join(root, 'resources', 'AssetManager'),
+            getResourcePath('tools', 'AssetManager')
+        ];
+
+        for (const candidate of candidates) {
+            if (fs.existsSync(candidate)) return candidate;
+        }
     }
 
     // 개발 초기에는 폴더가 아직 없을 수 있으므로 process.cwd() 기준으로 생성 가능하게 둡니다.
-    return path.join(process.cwd(), 'resources', 'AssetManager');
+    return getResourcePath('tools', 'AssetManager');
 }
 
 function getPatcherPaths(): PatcherPaths {
     const patcherRoot = findPatcherRoot();
-    const executablePath = path.join(patcherRoot, 'AssetManager_UnityPy.exe');
+    const executableCandidates = [
+        path.join(patcherRoot, 'AssetManager_UnityPy.exe'),
+        path.join(path.dirname(patcherRoot), 'AssetManager_UnityPy.exe')
+    ];
+    const executablePath = executableCandidates.find((candidate) => fs.existsSync(candidate)) || executableCandidates[0];
 
     const paths: PatcherPaths = {
         patcherRoot,
         executablePath,
         metadataDir: path.join(patcherRoot, 'metadata'),
         originalsDir: path.join(patcherRoot, 'originals'),
-        workDir: path.join(patcherRoot, 'work'),
-        plansDir: path.join(patcherRoot, 'work', 'plans'),
-        reportsDir: path.join(patcherRoot, 'reports')
+        workDir: getStoragePath('asset-manager-work'),
+        plansDir: getStoragePath('asset-manager-work', 'plans'),
+        reportsDir: getStoragePath('asset-manager-work', 'reports')
     };
 
     ensureDir(paths.metadataDir);
@@ -154,6 +250,10 @@ function getPatcherPaths(): PatcherPaths {
 
 function getSharedAssetsFile(gamePath: string): string {
     return path.join(gamePath, 'LongYinLiZhiZhuan_Data', 'sharedassets1.assets');
+}
+
+function getResourcesAssetsFile(gamePath: string): string {
+    return path.join(gamePath, 'LongYinLiZhiZhuan_Data', 'resources.assets');
 }
 
 function readPngSize(filePath: string): SizeTuple {
@@ -218,7 +318,7 @@ function requireNumber(value: unknown, fieldName: string): number {
     return numberValue;
 }
 
-function buildJob(target: TexturePatchTargetParam, gameId: string, assetsFile: string): TexturePatchJob {
+function buildJob(target: TexturePatchTargetParam, gameId: string, assetsFile: string, paths: PatcherPaths): TexturePatchJob {
     const pngFile = requireString(target.pngFile || target.pngPath, 'png_file');
     const size = target.size || readPngSize(pngFile);
 
@@ -236,12 +336,12 @@ function buildJob(target: TexturePatchTargetParam, gameId: string, assetsFile: s
         png_file: pngFile,
         atlas_file: null,
         output_assets_file: null,
-        originals_dir: '../originals',
+        originals_dir: paths.originalsDir,
         flip_y: true
     };
 }
 
-function buildPlan(params: RunTexturePatchParams, assetsFile: string): TexturePatchPlan {
+function buildPlan(params: RunTexturePatchParams, assetsFile: string, paths: PatcherPaths): TexturePatchPlan {
     const gameId = params.gameId || 'LongYinLiZhiZhuan';
     const targets = normalizeTargets(params);
 
@@ -249,8 +349,84 @@ function buildPlan(params: RunTexturePatchParams, assetsFile: string): TexturePa
         kind: 'texture',
         dry_run: params.dryRun ?? params.dry_run ?? false,
         stop_on_error: params.stopOnError ?? params.stop_on_error ?? true,
-        texture_metadata_path: '../metadata/data.tsv',
-        jobs: targets.map((target) => buildJob(target, gameId, assetsFile))
+        texture_metadata_path: path.join(paths.metadataDir, 'data.tsv'),
+        jobs: targets.map((target) => buildJob(target, gameId, assetsFile, paths))
+    };
+}
+
+function getFontCommonParams(params: RunFontPatchParams | RunFontExtractParams | RunFontListParams) {
+    const settings = getAppSettings();
+    const gamePath = params.gamePath || settings.gamePath;
+
+    if (!gamePath) {
+        throw new Error('게임 경로가 설정되지 않았습니다.');
+    }
+
+    const assetsFile = getResourcesAssetsFile(gamePath);
+
+    if (!fs.existsSync(assetsFile)) {
+        throw new Error(`resources.assets 파일을 찾지 못했습니다: ${assetsFile}`);
+    }
+
+    return {
+        gameId: params.gameId || 'LongYinLiZhiZhuan',
+        assetsFile
+    };
+}
+
+function normalizeFontPathId(job: FontJobParam): number {
+    return requireNumber(job.path_id ?? job.pathId, 'path_id');
+}
+
+function buildFontExtractPlan(params: RunFontExtractParams, assetsFile: string, paths: PatcherPaths): FontExtractPlan {
+    return {
+        kind: 'font_extract',
+        game_id: params.gameId || 'LongYinLiZhiZhuan',
+        font_metadata_path: path.join(paths.metadataDir, 'fonts_data.tsv'),
+        originals_dir: paths.originalsDir,
+        assets_file: assetsFile,
+        overwrite: params.overwrite ?? false
+    };
+}
+
+function buildFontPatchPlan(params: RunFontPatchParams, assetsFile: string, paths: PatcherPaths): FontPatchPlan {
+    return {
+        kind: 'font',
+        game_id: params.gameId || 'LongYinLiZhiZhuan',
+        dry_run: params.dryRun ?? params.dry_run ?? false,
+        stop_on_error: params.stopOnError ?? params.stop_on_error ?? true,
+        font_metadata_path: path.join(paths.metadataDir, 'fonts_data.tsv'),
+        originals_dir: paths.originalsDir,
+        assets_file: assetsFile,
+        jobs: params.jobs.map((job) => ({
+            path_id: normalizeFontPathId(job),
+            replacement_font_file: requireString(
+                job.replacement_font_file || job.replacementFontFile,
+                'replacement_font_file'
+            )
+        }))
+    };
+}
+
+function buildFontRestorePlan(params: RunFontPatchParams, assetsFile: string, paths: PatcherPaths): FontRestorePlan {
+    return {
+        kind: 'font_restore',
+        game_id: params.gameId || 'LongYinLiZhiZhuan',
+        dry_run: params.dryRun ?? params.dry_run ?? false,
+        stop_on_error: params.stopOnError ?? params.stop_on_error ?? true,
+        font_metadata_path: path.join(paths.metadataDir, 'fonts_data.tsv'),
+        originals_dir: paths.originalsDir,
+        assets_file: assetsFile,
+        jobs: params.jobs.map((job) => ({
+            path_id: normalizeFontPathId(job)
+        }))
+    };
+}
+
+function buildFontListPlan(assetsFile: string): FontListPlan {
+    return {
+        kind: 'font_list',
+        assets_file: assetsFile
     };
 }
 
@@ -258,6 +434,11 @@ function runProcess(command: string, args: string[], cwd: string): Promise<{ exi
     return new Promise((resolve, reject) => {
         const child = spawn(command, args, {
             cwd,
+            env: {
+                ...process.env,
+                PYTHONIOENCODING: 'utf-8',
+                PYTHONUTF8: '1'
+            },
             windowsHide: true,
             shell: false
         });
@@ -281,15 +462,11 @@ function runProcess(command: string, args: string[], cwd: string): Promise<{ exi
 }
 
 async function executePatcher(paths: PatcherPaths, planPath: string, reportPath: string) {
-    const relativePlan = path.relative(paths.workDir, planPath);
-    const relativeReport = path.relative(paths.workDir, reportPath);
-
     if (fs.existsSync(paths.executablePath)) {
-        return runProcess(paths.executablePath, ['--plan', relativePlan, '--report', relativeReport], paths.workDir);
+        return runProcess(paths.executablePath, ['--plan', planPath, '--report', reportPath], paths.patcherRoot);
     }
 
-    // 개발 중 exe가 없을 때만 Python 모듈 실행을 시도합니다.
-    return runProcess('python', ['-m', 'asset_patcher.cli', '--plan', relativePlan, '--report', relativeReport], paths.workDir);
+    throw new Error(`AssetManager_UnityPy.exe를 찾지 못했습니다: ${paths.executablePath}`);
 }
 
 export async function runClothesPatch(params: RunTexturePatchParams) {
@@ -307,7 +484,7 @@ export async function runClothesPatch(params: RunTexturePatchParams) {
         throw new Error(`sharedassets1.assets 파일을 찾지 못했습니다: ${assetsFile}`);
     }
 
-    const plan = buildPlan(params, assetsFile);
+    const plan = buildPlan(params, assetsFile, paths);
     const name = `texture_patch_${timestamp()}`;
     const planPath = path.join(paths.plansDir, `${name}.json`);
     const reportPath = path.join(paths.reportsDir, `${name}.report.json`);
@@ -338,4 +515,71 @@ export async function runClothesPatch(params: RunTexturePatchParams) {
         stderr: processResult.stderr,
         report
     };
+}
+
+async function runFontPlan(
+    kind: 'font_extract' | 'font_patch' | 'font_restore' | 'font_list',
+    plan: FontExtractPlan | FontPatchPlan | FontRestorePlan | FontListPlan
+) {
+    const paths = getPatcherPaths();
+    const name = `${kind}_${timestamp()}`;
+    const planPath = path.join(paths.plansDir, `${name}.json`);
+    const reportPath = path.join(paths.reportsDir, `${name}.report.json`);
+
+    fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf-8');
+
+    const processResult = await executePatcher(paths, planPath, reportPath);
+    const reportExists = fs.existsSync(reportPath);
+    const report = reportExists
+        ? JSON.parse(fs.readFileSync(reportPath, 'utf-8'))
+        : null;
+
+    if (processResult.exitCode !== 0 || !report || report.status !== 'success') {
+        throw new Error([
+            'AssetManager_UnityPy 실행 실패',
+            `exitCode=${processResult.exitCode}`,
+            report ? `report.status=${report.status}` : 'report 없음',
+            processResult.stderr.trim() ? `stderr=${processResult.stderr.trim()}` : ''
+        ].filter(Boolean).join('\n'));
+    }
+
+    return {
+        ok: true,
+        planPath,
+        reportPath,
+        stdout: processResult.stdout,
+        stderr: processResult.stderr,
+        report
+    };
+}
+
+export async function runFontExtract(params: RunFontExtractParams = {}) {
+    const { gameId, assetsFile } = getFontCommonParams(params);
+    const paths = getPatcherPaths();
+    return runFontPlan('font_extract', buildFontExtractPlan({ ...params, gameId }, assetsFile, paths));
+}
+
+export async function runFontPatch(params: RunFontPatchParams) {
+    if (!params.jobs?.length) {
+        throw new Error('폰트 교체 작업이 없습니다.');
+    }
+
+    const { gameId, assetsFile } = getFontCommonParams(params);
+    const paths = getPatcherPaths();
+    return runFontPlan('font_patch', buildFontPatchPlan({ ...params, gameId }, assetsFile, paths));
+}
+
+export async function runFontRestore(params: RunFontPatchParams) {
+    if (!params.jobs?.length) {
+        throw new Error('폰트 복원 작업이 없습니다.');
+    }
+
+    const { gameId, assetsFile } = getFontCommonParams(params);
+    const paths = getPatcherPaths();
+    return runFontPlan('font_restore', buildFontRestorePlan({ ...params, gameId }, assetsFile, paths));
+}
+
+export async function runFontList(params: RunFontListParams = {}) {
+    const { assetsFile } = getFontCommonParams(params);
+    return runFontPlan('font_list', buildFontListPlan(assetsFile));
 }

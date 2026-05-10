@@ -16,8 +16,9 @@ import InventoryIcon from '@mui/icons-material/Inventory';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import SettingsIcon from '@mui/icons-material/Settings';
 import MenuOpenIcon from '@mui/icons-material/MenuOpen';
-
-type Page = 'home' | 'mod' | 'asset' | 'optimizer' | 'settings';
+import BrushIcon from '@mui/icons-material/Brush';
+import MemoryIcon from '@mui/icons-material/Memory';
+import type { Page } from '../App';
 
 type Props = {
     open: boolean;
@@ -30,6 +31,8 @@ const menus = [
     { page: 'home', label: 'Home', icon: <HomeIcon /> },
     { page: 'mod', label: 'Mod Manager', icon: <ExtensionIcon /> },
     { page: 'asset', label: 'Asset Manager', icon: <InventoryIcon /> },
+    { page: 'graphics', label: 'Graphics Tool', icon: <BrushIcon /> },
+    { page: 'cheat', label: 'Cheat Engine', icon: <MemoryIcon /> },
     { page: 'optimizer', label: 'Optimizer', icon: <AutoFixHighIcon /> },
     { page: 'settings', label: 'Settings', icon: <SettingsIcon /> }
 ] as const;

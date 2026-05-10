@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "gameId": "LongYinLiZhiZhuan",
+  "portrait": {
+    "coordinateWidth": 1200,
+    "coordinateHeight": 1500,
+    "outputs": {
+      "high": { "width": 1200, "height": 1500 },
+      "standard": { "width": 560, "height": 700 }
+    },
+    "overlays": {
+      "silhouette": "silhouette.png",
+      "guide": "guide_lines.png"
+    }
+  },
+  "videoFilters": {
+    "filters": [
+      {
+        "id": "chromaKeyAdvanced",
+        "labels": { "en": "Chroma Key: Advanced", "ko": "크로마 키: 고급", "zh-CN": "色鍵：進階" },
+        "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/select0r", "mltService": "frei0r.select0r" },
+        "engine": "frei0r",
+        "pluginFile": "select0r.dll",
+        "enabled": true,
+        "defaults": { "keyColor": "#00cc00", "invert": true, "deltaR": 0.2, "deltaG": 0.2, "deltaB": 0.2, "slope": 0, "colorSpace": 0, "shape": 0.5, "edge": 0.9, "operation": 0.5 }
+      },
+      {
+        "id": "keySpillAdvanced",
+        "labels": { "en": "Key Spill: Advanced", "ko": "키 스필: 고급", "zh-CN": "色键溢色: 高级" },
+        "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/keyspillm0pup", "mltService": "frei0r.keyspillm0pup" },
+        "engine": "frei0r",
+        "pluginFile": "keyspillm0pup.dll",
+        "enabled": true,
+        "defaults": { "keyColor": "#19cc19", "targetColor": "#c67f66", "maskType": 0, "tolerance": 0.24, "slope": 0.4, "hueGate": 0.25, "saturationThreshold": 0.15, "operation1": 1, "amount1": 0.5, "operation2": 0, "amount2": 0.5, "showMask": false, "maskAlpha": false }
+      },
+      {
+        "id": "alphaChannelAdjust",
+        "labels": { "en": "Alpha Channel: Adjust", "ko": "알파 채널: 조정", "zh-CN": "透明通道: 调节" },
+        "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/alpha_adjust", "mltService": "frei0r.alpha0ps" },
+        "engine": "frei0r",
+        "pluginFile": "alpha0ps_alpha0ps.dll",
+        "enabled": true,
+        "defaults": { "operation": 0, "threshold": 0.5, "amount": 0.5, "invert": false }
+      },
+      {
+        "id": "saturation",
+        "labels": { "en": "Saturation", "ko": "채도", "zh-CN": "饱和度" },
+        "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/saturation", "mltService": "frei0r.saturat0r" },
+        "engine": "frei0r",
+        "pluginFile": "saturat0r.dll",
+        "enabled": true,
+        "defaults": { "level": 100 }
+      },
+      {
+        "id": "contrast",
+        "labels": { "en": "Contrast", "ko": "대비", "zh-CN": "對比" },
+        "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/contrast", "mltService": "lift_gamma_gain" },
+        "engine": "ffmpeg-native",
+        "enabled": true,
+        "defaults": { "level": 50 },
+        "export": { "note": "Shotcut uses MLT lift_gamma_gain; HexX Forge approximates with FFmpeg eq/gamma unless MLT is bundled later." }
+      },
+      {
+        "id": "colorGrading",
+        "labels": { "en": "Color Grading", "ko": "색 보정", "zh-CN": "色彩分级" },
+        "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/color", "mltService": "lift_gamma_gain" },
+        "engine": "ffmpeg-native",
+        "enabled": true,
+        "defaults": {
+          "lift": { "r": 0, "g": 0, "b": 0 },
+          "gamma": { "r": 0, "g": 0, "b": 0 },
+          "gain": { "r": 0, "g": 0, "b": 0 }
+        },
+        "export": { "note": "Shotcut Color Grading is approximated with FFmpeg eq/colorchannelmixer in v1." }
+      }
+    ],
+    "colorPresets": [
+      {
+        "id": "neutral",
+        "label": "Neutral",
+        "labels": { "en": "Neutral", "ko": "중립", "zh-CN": "中性" },
+        "preview": { "brightness": 1, "contrast": 1, "saturation": 1, "sepia": 0, "hueRotate": 0 },
+        "ffmpeg": { "eq": {} }
+      },
+      {
+        "id": "warm",
+        "label": "Warm",
+        "labels": { "en": "Warm", "ko": "따뜻함", "zh-CN": "暖色" },
+        "preview": { "brightness": 1.01, "contrast": 1.04, "saturation": 1.08, "sepia": 0.06, "hueRotate": 0 },
+        "ffmpeg": { "eq": { "contrast": 1.04, "brightness": 0.01, "saturation": 1.08, "gamma_r": 1.03 } }
+      },
+      {
+        "id": "cool",
+        "label": "Cool",
+        "labels": { "en": "Cool", "ko": "차가움", "zh-CN": "冷色" },
+        "preview": { "brightness": 1, "contrast": 1.03, "saturation": 0.96, "sepia": 0, "hueRotate": -6 },
+        "ffmpeg": { "eq": { "contrast": 1.03, "saturation": 0.96, "gamma_b": 1.04 } }
+      },
+      {
+        "id": "dramatic",
+        "label": "Dramatic",
+        "labels": { "en": "Dramatic", "ko": "극적", "zh-CN": "戏剧化" },
+        "preview": { "brightness": 0.99, "contrast": 1.12, "saturation": 1.16, "sepia": 0, "hueRotate": 0 },
+        "ffmpeg": { "eq": { "contrast": 1.12, "brightness": -0.01, "saturation": 1.16 } }
+      }
+    ]
+  },
+  "rigging": {
+    "status": "mockup",
+    "mockup": "rigging_mockup.png"
+  }
+}

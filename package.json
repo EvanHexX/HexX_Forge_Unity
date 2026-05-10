@@ -1,6 +1,6 @@
 {
   "name": "hexx-forge-unity",
-  "version": "0.1.0",
+  "version": "1.15.3-beta.0",
   "description": "HexX Forge - Unity game mod and asset manager",
   "main": "dist/main/main.js",
   "scripts": {
@@ -11,15 +11,105 @@
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
     "build": "npm run build:renderer && npm run build:main",
+    "clean:release": "node scripts/clean-release-artifacts.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "dist": "npm run build && npm run clean:release && electron-builder && npm run verify:release",
+    "publish": "npm run build && npm run clean:release && electron-builder --publish always && npm run verify:release",
     "start": "npm run build && electron ."
   },
   "private": true,
+  "build": {
+    "appId": "com.evanhexx.hexxforgeunity",
+    "productName": "HexX Forge",
+    "artifactName": "HexX-Forge-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "afterPack": "scripts/after-pack-win-icon.cjs",
+    "asar": false,
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "config",
+        "to": "config",
+        "filter": [
+          "**/*",
+          "!app_settings",
+          "!app_settings.json"
+        ]
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "build/icon.ico"
+      },
+      {
+        "from": "resources",
+        "to": "resources",
+        "filter": [
+          "**/*",
+          "!tools/AssetManager/work/**",
+          "!tools/AssetManager/reports/**",
+          "!**/*.report.json",
+          "!**/__pycache__/**",
+          "!**/.DS_Store"
+        ]
+      },
+      {
+        "from": "storage",
+        "to": "storage",
+        "filter": [
+          "asset_packs/**/*",
+          "fonts/**/*",
+          "textures/**/*"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "EvanHexX",
+        "repo": "HexX_Forge_Unity"
+      }
+    ],
+    "electronUpdaterCompatibility": ">=2.16"
+  },
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^9.0.0",
     "@mui/material": "^9.0.0",
     "adm-zip": "^0.5.17",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.3",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
@@ -32,6 +122,7 @@
     "concurrently": "^9.1.2",
     "cross-env": "^10.1.0",
     "electron": "^41.3.0",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.8.0",
     "vite": "^6.3.0",
     "wait-on": "^8.0.3"

@@ -4,9 +4,10 @@
 import AdmZip from 'adm-zip';
 import fs from 'node:fs';
 import path from 'node:path';
+import { getBundledStoragePath, getStoragePath } from './runtimePaths';
 
-const ROOT_DIR = process.cwd();
-const PACK_ROOT = path.join(ROOT_DIR, 'storage', 'asset_packs');
+const PACK_ROOT = getStoragePath('asset_packs');
+const BUNDLED_PACK_ROOT = getBundledStoragePath('asset_packs');
 
 type SizeTuple = [number, number];
 
@@ -113,10 +114,20 @@ function readPackFromDir(packDir: string): AssetPack | null {
 export function getAssetPacks(): AssetPack[] {
     ensureDir(PACK_ROOT);
 
-    return fs
-        .readdirSync(PACK_ROOT, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('__'))
-        .map((entry) => readPackFromDir(path.join(PACK_ROOT, entry.name)))
+    const packDirs = new Map<string, string>();
+
+    for (const root of [BUNDLED_PACK_ROOT, PACK_ROOT]) {
+        if (!fs.existsSync(root)) continue;
+
+        for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+            if (entry.isDirectory() && !entry.name.startsWith('__')) {
+                packDirs.set(entry.name, path.join(root, entry.name));
+            }
+        }
+    }
+
+    return [...packDirs.values()]
+        .map((packDir) => readPackFromDir(packDir))
         .filter((pack): pack is AssetPack => pack !== null);
 }
 

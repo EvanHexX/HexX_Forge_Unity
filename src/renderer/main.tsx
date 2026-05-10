@@ -3,6 +3,7 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './polyfills/focusVisible';
 import App from './App';
 import './styles/global.css';
 

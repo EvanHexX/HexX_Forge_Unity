@@ -9,13 +9,7 @@ body {
     margin: 0;
     min-width: 1000px;
     min-height: 700px;
-    font-family:
-            Pretendard,
-            "Segoe UI",
-            system-ui,
-            -apple-system,
-            BlinkMacSystemFont,
-            sans-serif;
+    font-family: var(--font-family, Pretendard, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif);
     color: var(--text-color);
     background:
             radial-gradient(circle at top left, color-mix(in srgb, var(--primary-color) 35%, transparent), transparent 34%),
@@ -24,7 +18,7 @@ body {
 }
 
 button {
-    font-family: inherit;
+    font-family: var(--font-family, inherit);
 }
 
 .app-shell {

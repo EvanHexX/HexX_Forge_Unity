@@ -3,51 +3,210 @@
 
 import {contextBridge, ipcRenderer} from 'electron';
 
+type UpdateStatus = {
+    state: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+    currentVersion: string;
+    availableVersion?: string;
+    releaseName?: string;
+    releaseDate?: string;
+    progress?: number;
+    message?: string;
+    error?: string;
+    isPackaged: boolean;
+};
+
+type GitHubRelease = {
+    id: number;
+    name: string;
+    tagName: string;
+    htmlUrl: string;
+    publishedAt: string;
+    body: string;
+    prerelease: boolean;
+};
+
+type OnlineModCatalogItem = {
+    id: string;
+    name: string;
+    author: string;
+    description: string;
+    version: string;
+    downloadPath: string;
+    sha256?: string;
+    gameIds?: string[];
+    installedPackageId?: string;
+    installedVersion?: string;
+    installed?: boolean;
+    updateAvailable?: boolean;
+};
+
 const electronAPI = {
     getVersion: (): Promise<string> => ipcRenderer.invoke('app:get-version'),
+    getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:get-status'),
+    checkForUpdates: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:check'),
+    downloadUpdate: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:download'),
+    installUpdate: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:install'),
+    onUpdateStatus: (listener: (status: UpdateStatus) => void): (() => void) => {
+        const subscription = (_event: Electron.IpcRendererEvent, status: UpdateStatus) => listener(status);
+
+        ipcRenderer.on('updates:status', subscription);
+
+        return () => {
+            ipcRenderer.removeListener('updates:status', subscription);
+        };
+    },
 
     getSettings: () => ipcRenderer.invoke('config:get-settings'),
     getThemes: () => ipcRenderer.invoke('config:get-themes'),
+    getTypographyOptions: () => ipcRenderer.invoke('config:get-typography-options'),
+    getSupportedGames: () => ipcRenderer.invoke('config:get-supported-games'),
     setTheme: (themeName: string) => ipcRenderer.invoke('config:set-theme', themeName),
-    setGamePath: (gamePath: string) => ipcRenderer.invoke('config:set-game-path', gamePath),
+    setTypography: (typography: string) => ipcRenderer.invoke('config:set-typography', typography),
+    setLanguage: (language: string) => ipcRenderer.invoke('config:set-language', language),
+    setSelectedGame: (gameId: string) => ipcRenderer.invoke('config:set-selected-game', gameId),
+    setGamePath: (gamePath: string, gameId?: string) => ipcRenderer.invoke('config:set-game-path', gamePath, gameId),
     selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
+    getGitHubReleases: (): Promise<GitHubRelease[]> => ipcRenderer.invoke('github:get-releases'),
 
-    // Mod Manager preloads
+    // Mod Manager
     scanMods: () => ipcRenderer.invoke('mods:scan'),
+    getOnlineModCatalog: (): Promise<OnlineModCatalogItem[]> =>
+        ipcRenderer.invoke('mods:get-online-catalog'),
+    downloadOnlineMod: (item: OnlineModCatalogItem) =>
+        ipcRenderer.invoke('mods:download-online-mod', item),
+    updateOnlineMod: (item: OnlineModCatalogItem) =>
+        ipcRenderer.invoke('mods:update-online-mod', item),
     selectModImportFile: () => ipcRenderer.invoke('mods:select-import-file'),
+    selectFile: (accept?: string) => ipcRenderer.invoke('mods:select-file', accept),
+    readTextFile: (filePath: string) => ipcRenderer.invoke('mods:read-text-file', filePath),
+    readZipEntryText: (zipPath: string, entryName: string): Promise<string> =>
+        ipcRenderer.invoke('mods:read-zip-entry-text', zipPath, entryName),
+    getModPackGuide: (): Promise<string> => ipcRenderer.invoke('mods:get-pack-guide'),
+
+    inspectZip: (zipPath: string) => ipcRenderer.invoke('mods:inspect-zip', zipPath),
+
+    setPackageEnabled: (packageId: string, enabled: boolean) =>
+        ipcRenderer.invoke('mods:set-package-enabled', packageId, enabled),
+    setDllEnabled: (relativePath: string, enabled: boolean) =>
+        ipcRenderer.invoke('mods:set-dll-enabled', relativePath, enabled),
 
     importDllMod: (filePath: string, name: string, author: string) =>
         ipcRenderer.invoke('mods:import-dll', filePath, name, author),
-
     importZipMod: (filePath: string) =>
         ipcRenderer.invoke('mods:import-zip', filePath),
+    importZipConfigured: (
+        zipPath: string,
+        config: {
+            name: string;
+            author: string;
+            description: string;
+            packageType: 'collection' | 'single';
+            files: Array<{
+                entryName: string;
+                type: string;
+                name?: string;
+                author?: string;
+                dependsOn?: string;
+            }>;
+        }
+    ) => ipcRenderer.invoke('mods:import-zip-configured', zipPath, config),
+    createAndImportPackage: (data: {
+        name: string;
+        author: string;
+        description: string;
+        packageType: 'collection' | 'single';
+        files: Array<{ filePath: string; name: string; author: string }>;
+    }) => ipcRenderer.invoke('mods:create-and-import', data),
 
-    deleteMod: (relativePath: string) =>
-        ipcRenderer.invoke('mods:delete', relativePath),
+    deletePackage: (packageId: string) =>
+        ipcRenderer.invoke('mods:delete-package', packageId),
+
+    getPackageSettings: (packageId: string) =>
+        ipcRenderer.invoke('mods:get-package-settings', packageId),
+    applyPackageSettings: (packageId: string, changes: any) =>
+        ipcRenderer.invoke('mods:apply-package-settings', packageId, changes),
+    applyCfgValue: (configPath: string, section: string, key: string, value: string) =>
+        ipcRenderer.invoke('mods:apply-cfg-value', configPath, section, key, value),
+    readConfigText: (configPath: string) =>
+        ipcRenderer.invoke('mods:read-config-text', configPath),
+    writeConfigText: (configPath: string, content: string) =>
+        ipcRenderer.invoke('mods:write-config-text', configPath, content),
+    copyResource: (sourcePath: string, targetRelativePath: string) =>
+        ipcRenderer.invoke('mods:copy-resource', sourcePath, targetRelativePath),
+    selectManagedFile: (accept?: string) => ipcRenderer.invoke('mods:select-file', accept),
+
+    // backward compat
+    deleteMod: (relativePath: string) => ipcRenderer.invoke('mods:delete', relativePath),
     setModEnabled: (relativePath: string, enabled: boolean) =>
         ipcRenderer.invoke('mods:set-enabled', relativePath, enabled),
 
     // Asset Manager preloads
     getAssetStatus: () => ipcRenderer.invoke('asset:get-status'),
-    backupAsset: (type: 'font' | 'asset') =>
-        ipcRenderer.invoke('asset:backup', type),
+    backupAsset: (type: 'font' | 'asset') => ipcRenderer.invoke('asset:backup', type),
+    restoreAssetBackup: (type: 'font' | 'asset') => ipcRenderer.invoke('asset:restore-backup', type),
     getTextureCatalog: () => ipcRenderer.invoke('asset:get-texture-catalog'),
     getAssetCatalog: () => ipcRenderer.invoke('asset:get-catalog'),
+    getFontTargets: () => ipcRenderer.invoke('asset:get-font-targets'),
+    getStoredFonts: () => ipcRenderer.invoke('asset:get-stored-fonts'),
+    importFont: (sourcePath: string) => ipcRenderer.invoke('asset:import-font', sourcePath),
+    selectReplacementImage: () => ipcRenderer.invoke('asset:select-replacement-image'),
+    patchTexture: (params: any) => ipcRenderer.invoke('texture:patch', params),
+    runClothesPatch: (params: any) => ipcRenderer.invoke('asset:run-clothes-patch', params),
+    runFontExtract: (params: any) => ipcRenderer.invoke('asset:run-font-extract', params),
+    runFontPatch: (params: any) => ipcRenderer.invoke('asset:run-font-patch', params),
+    runFontRestore: (params: any) => ipcRenderer.invoke('asset:run-font-restore', params),
+    runFontList: (params: any) => ipcRenderer.invoke('asset:run-font-list', params),
 
-    selectReplacementImage: () =>
-        ipcRenderer.invoke('asset:select-replacement-image'),
-    patchTexture: (params: any) =>
-        ipcRenderer.invoke('texture:patch', params),
-    runClothesPatch: (params: any) =>
-        ipcRenderer.invoke('asset:run-clothes-patch', params),
+    // Mod packing
+    packMod: (data: {
+        name: string;
+        author: string;
+        description: string;
+        packageType: 'collection' | 'single';
+        files: Array<{ filePath: string; name: string; author: string }>;
+        settingsScript?: unknown;
+        sources?: Array<{
+            sourcePath: string;
+            sourceKind: 'dll' | 'zip';
+            name: string;
+            author: string;
+            description?: string;
+            packageType: 'collection' | 'single';
+            files: Array<{
+                entryName: string;
+                type: string;
+                name?: string;
+                author?: string;
+                dependsOn?: string;
+            }>;
+        }>;
+        savePath: string;
+    }) => ipcRenderer.invoke('mods:pack-mod', data),
+    selectSavePath: (defaultName?: string) => ipcRenderer.invoke('mods:select-save-path', defaultName),
+
+    // Graphics Tool
+    getGraphicsAssets: () => ipcRenderer.invoke('graphics:get-assets'),
+    getGraphicsConfig: () => ipcRenderer.invoke('graphics:get-config'),
+    selectGraphicsVideo: () => ipcRenderer.invoke('graphics:select-video'),
+    selectGraphicsImage: () => ipcRenderer.invoke('graphics:select-image'),
+    checkFfmpeg: () => ipcRenderer.invoke('graphics:check-ffmpeg'),
+    createPortraitLoop: (params: any) => ipcRenderer.invoke('graphics:create-loop', params),
+    exportPortraitVideo: (params: any) => ipcRenderer.invoke('graphics:export-video', params),
+    exportPortraitImage: (params: any) => ipcRenderer.invoke('graphics:export-image', params),
+    onGraphicsProgress: (listener: (status: any) => void): (() => void) => {
+        const subscription = (_event: Electron.IpcRendererEvent, status: any) => listener(status);
+
+        ipcRenderer.on('graphics:progress', subscription);
+
+        return () => {
+            ipcRenderer.removeListener('graphics:progress', subscription);
+        };
+    },
 
     // Asset Pack preloads
     getAssetPacks: () => ipcRenderer.invoke('asset:get-packs'),
-
     selectAssetPackZip: () => ipcRenderer.invoke('asset:select-pack-zip'),
-
-    importAssetPack: (zipPath: string) =>
-        ipcRenderer.invoke('asset:import-pack', zipPath),
+    importAssetPack: (zipPath: string) => ipcRenderer.invoke('asset:import-pack', zipPath),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

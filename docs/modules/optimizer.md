@@ -1,27 +1,31 @@
 # Optimizer Launcher
 
-## 🎯 목적
+## Purpose
 
-기존 PySide6 기반 비급 최적화 도구 실행
+Launch and manage the existing PySide6-based optimizer tool from HexX Forge.
 
----
+## Current status
 
-## ⚙️ 방식
+- Optimizer execution is not implemented yet.
+- The page includes a temporary **Splash Preview** button for testing the shared app splash overlay.
+- The splash preview is intentionally temporary and should be removed or moved once the Optimizer launcher UI is implemented.
 
-- Electron → exe 실행
+## Splash preview
 
----
+- Uses the shared renderer `SplashScreen` component.
+- Verifies the startup/update visual language without requiring a packaged update flow.
+- The preview uses the bundled `src/renderer/assets/splash/Logo_without_title.png` asset.
 
-## 📦 설정
+## Planned settings
 
 ```json
 {
   "optimizerPath": "..."
 }
 ```
----
-## 🚧 상태
 
-- 미구현
+## TODO
 
----
+- Implement optimizer executable path configuration.
+- Launch the optimizer executable from Electron.
+- Replace the temporary splash preview area with real optimizer controls when the launcher is ready.

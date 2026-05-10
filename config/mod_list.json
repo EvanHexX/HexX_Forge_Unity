@@ -1,11 +1,371 @@
 {
-  "lyzz_HexX.dll": {
-    "name": "비급 최적화 도구",
-    "description": "용윤입지전 비급 최적화 플러그인"
+  "packages": {
+    "4aa4f205-ceb6-4890-8d1c-3f34310bb80e": {
+      "id": "4aa4f205-ceb6-4890-8d1c-3f34310bb80e",
+      "name": "ResourceInjector_1.3.26-beta",
+      "author": "",
+      "description": "",
+      "packageType": "single",
+      "dllPaths": [],
+      "files": [
+        {
+          "path": "ResourceInjector/portraits/bundles/testbundle.bundle",
+          "type": "asset",
+          "author": ""
+        },
+        {
+          "path": "ResourceInjector/portraits/png/pose7_resized.png",
+          "type": "asset",
+          "author": ""
+        },
+        {
+          "path": "ResourceInjector/portraits/webm/Final_1.webm",
+          "type": "asset",
+          "author": ""
+        },
+        {
+          "path": "ResourceInjector.dll",
+          "type": "dll",
+          "author": ""
+        },
+        {
+          "path": "settings.configurator.json",
+          "type": "script",
+          "dependsOn": "modpack"
+        }
+      ]
+    },
+    "85b9aaf1-b4b0-40cb-883d-e3ab8497a6e1": {
+      "id": "85b9aaf1-b4b0-40cb-883d-e3ab8497a6e1",
+      "name": "ResourceInjector_1.3.26-beta",
+      "author": "",
+      "description": "",
+      "packageType": "single",
+      "dllPaths": [],
+      "files": [
+        {
+          "path": "mod-info.json",
+          "type": "mod-info"
+        },
+        {
+          "path": "ResourceInjector.dll",
+          "type": "dll"
+        },
+        {
+          "path": "ResourceInjector/portraits/bundles/testbundle.bundle",
+          "type": "asset"
+        },
+        {
+          "path": "ResourceInjector/portraits/png/pose7_resized.png",
+          "type": "asset"
+        },
+        {
+          "path": "ResourceInjector/portraits/webm/Final_1.webm",
+          "type": "asset"
+        },
+        {
+          "path": "settings.configurator.json",
+          "type": "script",
+          "dependsOn": "modpack"
+        }
+      ]
+    },
+    "74bc9a32-aebf-4631-9f66-c8006df94285": {
+      "id": "74bc9a32-aebf-4631-9f66-c8006df94285",
+      "name": "test2",
+      "author": "test2",
+      "description": "2tet",
+      "packageType": "single",
+      "dllPaths": [],
+      "files": [
+        {
+          "path": "plugins/OwnedBookMark.dll",
+          "type": "dll",
+          "author": "TestMod"
+        }
+      ]
+    },
+    "758f7013-9c56-4fbf-9244-00589233cea1": {
+      "id": "758f7013-9c56-4fbf-9244-00589233cea1",
+      "name": "test2",
+      "author": "test2",
+      "description": "2tet",
+      "packageType": "single",
+      "dllPaths": [
+        "plugins/OwnedBookMark.dll"
+      ],
+      "files": [
+        {
+          "path": "mod-info.json",
+          "type": "mod-info"
+        },
+        {
+          "path": "plugins/OwnedBookMark.dll",
+          "type": "dll",
+          "author": "TestMod"
+        }
+      ]
+    },
+    "1a4fb6aa-7df7-42df-9473-b0ac7ff3c69c": {
+      "id": "1a4fb6aa-7df7-42df-9473-b0ac7ff3c69c",
+      "name": "testc",
+      "author": "f",
+      "description": "f",
+      "packageType": "collection",
+      "dllPaths": [],
+      "files": [
+        {
+          "path": "3.json",
+          "type": "mod-info",
+          "dependsOn": "modpack"
+        },
+        {
+          "path": "Components/DelayedButtonCreator.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "Components/ModTagUIIdentifier.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "ModButtonManager.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "ModConfig.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "ModData.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "ModHeroGenerator.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "ModHeroUtil.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "ModManager.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "ModTagData.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "ModTagManager.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "Patches/FamilyPatches.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "Patches/HeroDetailTagsPatch.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "Patches/HeroTagIconPatch.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "Patches/InteractButtonPatches.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "Patches/SaveLoadPatches.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "Patches/TimePassPatches.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "Plugin.cs",
+          "type": "asset",
+          "author": "3"
+        },
+        {
+          "path": "OwnedBookMark.json",
+          "type": "mod-info",
+          "dependsOn": "plugins/OwnedBookMark.dll"
+        },
+        {
+          "path": "plugins/OwnedBookMark.dll",
+          "type": "dll",
+          "author": "f"
+        }
+      ]
+    },
+    "6bd178c5-f1fb-4e27-b521-8d39ee5bd1d3": {
+      "id": "6bd178c5-f1fb-4e27-b521-8d39ee5bd1d3",
+      "name": "test",
+      "author": "etst",
+      "description": "test",
+      "packageType": "single",
+      "dllPaths": [
+        "plugins/ResourceInjector.dll"
+      ],
+      "files": [
+        {
+          "path": "plugins/ResourceInjector.dll",
+          "type": "dll",
+          "author": "etst"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/bundles/testbundle.bundle",
+          "type": "asset",
+          "author": "etst"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/png/pose7_resized.png",
+          "type": "asset",
+          "author": "etst"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/webm/Final_1.webm",
+          "type": "asset",
+          "author": "etst"
+        },
+        {
+          "path": "plugins/settings.configurator.json",
+          "type": "script",
+          "author": "etst",
+          "dependsOn": "modpack"
+        },
+        {
+          "path": "plugins/ResourceInjector",
+          "type": "folder",
+          "author": "etst"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits",
+          "type": "folder",
+          "author": "etst"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/bundles",
+          "type": "folder",
+          "author": "etst"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/png",
+          "type": "folder",
+          "author": "etst"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/webm",
+          "type": "folder",
+          "author": "etst"
+        }
+      ]
+    },
+    "ef12b723-e19e-4f57-8ac2-1cf6877e1bbd": {
+      "id": "ef12b723-e19e-4f57-8ac2-1cf6877e1bbd",
+      "name": "ResourceInjector",
+      "author": "HexX",
+      "description": "adsf",
+      "packageType": "single",
+      "dllPaths": [],
+      "files": [
+        {
+          "path": "plugins/ResourceInjector",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/config",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/config/portrait_file_infos.json",
+          "type": "config",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/config/portrait_overrides.json",
+          "type": "config",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/packs",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/bundles",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/bundles/testbundle.bundle",
+          "type": "asset",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/png",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/png/pose7_resized.png",
+          "type": "asset",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/webm",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/webm/Final_1.webm",
+          "type": "asset",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector.dll",
+          "type": "dll",
+          "author": "HexX"
+        }
+      ]
+    }
   },
-  "test1.dll": {
-    "name": "test mod",
-    "author": "HexX",
-    "description": "테스트 모드 인포"
+  "mods": {
+    "plugins/OwnedBookMark.dll": {
+      "name": "OwnedBookMark.dll",
+      "author": "TestMod",
+      "packageId": "758f7013-9c56-4fbf-9244-00589233cea1"
+    },
+    "plugins/ResourceInjector.dll": {
+      "name": "test",
+      "author": "etst",
+      "description": "test",
+      "packageId": "6bd178c5-f1fb-4e27-b521-8d39ee5bd1d3"
+    }
   }
 }
