@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "mods": {
+    "id": "hexx-resource-injector",
+    "name": "특수 초상화 관리모드",
+    "version": "1.3.26",
+    "downloadPath": "mods/packages/hexx-resource-injector/1.3.26/hexx-resource-injector.1.3.26.zip"
+  }
+}
