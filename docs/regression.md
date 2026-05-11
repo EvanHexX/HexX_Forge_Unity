@@ -1,5 +1,44 @@
 # Regression Notes
 
+## 2026-05-11 Graphics Tool preview parity
+
+- 증상: Video Tool에서 `Color Grading`을 조정해도 viewport에 적용되지 않거나, `Alpha Channel: Adjust`가 단순 alpha 배율처럼 동작해 Shotcut/frei0r 결과와 크게 달라 보일 수 있다.
+- 원인: canvas preview pass 실행 조건에 `colorGrading`이 빠져 있었고, `alpha0ps` preview가 operation mode를 구분하지 않았다.
+- 예방: canvas preview pass는 chroma/key spill/alpha/color grading/image background alpha 중 하나라도 enabled이면 실행한다. Alpha preview는 `No Change`, `Threshold`, shrink/grow 계열을 최소한 mode별로 분리해 근사한다.
+- Image Tool의 background alpha는 export canvas와 preview canvas가 같은 color-key helper를 공유해야 한다. export-only 처리로 남기면 사용자가 내보내기 전 결과를 확인할 수 없다.
+- `config/graphics_presets.json`과 renderer fallback registry의 visible labels는 UTF-8 다국어 문자열로 유지한다. JSON parse 실패가 발생하면 fallback label이 그대로 UI에 노출된다.
+
+## 2026-05-11 Mod Manager linked JSON reconcile
+
+- Symptoms: 사용자가 예시 linked JSON으로 패킹할 때 JSON에만 남은 registry entry와 현재 패킹 asset에만 있는 파일을 수동으로 맞춰야 했다.
+- Cause: `file_manager` linked JSON editor는 preview/metadata 추론용 상태였고, 패킹 ZIP에 들어갈 JSON entry content override 경로가 없었다.
+- Prevention: linked JSON 정리 기능은 원본 JSON/ZIP을 직접 수정하지 않고 `contentTextOverride`를 통해 패킹 출력에만 반영한다.
+- Pack output 검증 시 linked JSON entry가 원본 ZIP bytes가 아니라 override text로 기록되는지 확인한다.
+- 추가 후보는 공통 default 값으로 일괄 생성하면 안 된다. 후보를 체크한 뒤 후보별 metadata 입력값이 해당 JSON key에만 반영되어야 한다.
+
+## 2026-05-11 Korean UI text mojibake prevention
+
+- 증상: 새로 추가한 Mod Manager visible text가 mojibake된 문자열로 저장될 수 있다.
+- 원인: 한글 UI 문자열을 패치한 뒤 UTF-8 원문 검증 없이 빌드만 통과시키면, TypeScript 문법은 정상이어도 화면에는 깨진 문구가 남는다.
+- 예방: 한글 visible text를 추가/수정한 뒤에는 `node` 또는 UTF-8 aware read로 해당 라인을 확인하고, mojibake 후보 패턴 검색을 함께 실행한다.
+- 빌드 통과는 인코딩 정상의 증거가 아니다. 사용자에게 보이는 새 한글 문구는 최종 응답 전 원문을 직접 확인한다.
+
+## 2026-05-11 Mod Manager dependency install base
+
+- 종속 모드 asset pack은 main mod 하위 폴더에 설치되어야 할 수 있다. 예: `plugins/ResourceInjector/pack`.
+- `dependency.installBase`가 있는 경우 BepInEx rooted path가 아닌 배포 파일/folder는 타입이 `config`여도 BepInEx 기준 `installBase` 아래로 배포한다.
+- 이미 `plugins/`, `config/`, `patchers/`로 시작하는 file path에는 `installBase`를 중복 적용하지 않는다.
+- DLL 위치는 기존 `plugins/*.dll` enable/disable 규칙을 유지한다.
+- file_manager `targetDir`은 `dependency.installBase` 기준 상대경로가 아니라 항상 BepInEx 기준 상대경로다. `종속 설치 기준 사용` 버튼은 값을 복사하는 shortcut일 뿐 runtime path 해석 규칙을 바꾸지 않는다.
+- `banana_zero_pack/pack_info.json` 같은 종속 config가 `BepInEx/banana_zero_pack/...`에 떨어지면 안 된다. installBase가 `plugins/ResourceInjector/packs`이면 최종 경로는 `BepInEx/plugins/ResourceInjector/packs/banana_zero_pack/pack_info.json`이어야 한다.
+- 종속 모드 file_manager의 `linkedConfigPath`도 runtime에서 BepInEx 기준으로 해석되므로, 패킹 시 installBase가 붙은 최종 경로로 저장되어야 한다.
+
+## 2026-05-11 Mod Manager dialog focus recovery
+
+- Symptoms: In Mod Packing and related dialogs, TextField focus could intermittently stop accepting keyboard input after using Electron native file/save dialogs or MUI Select menus. Alt+Tab out and back restored input.
+- Likely cause: Electron window activation, native dialog return timing, and MUI menu focus restore could leave keyboard focus on a stale non-editable element.
+- Prevention: After native dialogs and Select menu close, run delayed focus recovery several times. Do not blur the active element if it is already an input, textarea, or contenteditable element.
+
 ## 2026-05-11 Graphics Tool seek-then-play commit
 
 - 증상: timeline seek 후 UI bar는 선택 위치를 가리키지만 Play를 누르면 preview video가 0초부터 재생될 수 있다.
@@ -81,6 +120,8 @@
   - 파일 단위 `dependsOn`을 main mod dependency로 해석하면 기존 mod-info 파일 의존성이 깨진다.
 - 활성 dependent가 있는 main mod를 비활성화하거나 삭제하면 dependent asset/config가 남아 broken state가 될 수 있다.
   - main mod disable/delete 전에 active dependent를 검사하고 먼저 비활성화/삭제하도록 차단한다.
+- dependency parent를 접었는데 dependent가 root row로 다시 나타나면 안 된다.
+  - parent가 확인된 child는 fallback root 렌더링에서 제외하고, orphan dependent만 root 위치에 남긴다.
 ## 2026-05-11 Mod Manager version regressions
 
 - Local pack/import에서 `mod-info.json.version`을 버리면 온라인 update 비교와 로컬 목록 표시가 불가능하다.

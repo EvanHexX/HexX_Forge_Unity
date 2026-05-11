@@ -217,6 +217,14 @@ type ShotcutPreviewOptions = {
     cssFilter: string;
     filters: ShotcutVideoFilters;
     chromaMaskDataUrl?: string;
+    imageBackgroundAlpha?: ImageBackgroundAlphaPreview;
+};
+
+type ImageBackgroundAlphaPreview = {
+    enabled: boolean;
+    keyColor: string;
+    tolerance: number;
+    softness: number;
 };
 
 const OUTPUT_PRESETS: Record<PortraitOutputPreset, { label: string; width: number; height: number }> = {
@@ -574,8 +582,75 @@ function hexToRgb(value: string): [number, number, number] | null {
     ];
 }
 
-function buildCanvasPreviewOptions(cssFilter: string, filters: ShotcutVideoFilters, chromaMaskDataUrl?: string): ShotcutPreviewOptions {
-    return { cssFilter, filters, chromaMaskDataUrl };
+function rgbToHci(r: number, g: number, b: number): [number, number, number] {
+    const normalizedR = r / 255;
+    const normalizedG = g / 255;
+    const normalizedB = b / 255;
+    const max = Math.max(normalizedR, normalizedG, normalizedB);
+    const min = Math.min(normalizedR, normalizedG, normalizedB);
+    const chroma = max - min;
+    let hue = 0;
+
+    if (chroma > 0) {
+        if (max === normalizedR) hue = ((normalizedG - normalizedB) / chroma) % 6;
+        else if (max === normalizedG) hue = (normalizedB - normalizedR) / chroma + 2;
+        else hue = (normalizedR - normalizedG) / chroma + 4;
+        hue /= 6;
+        if (hue < 0) hue += 1;
+    }
+
+    return [hue, chroma, (normalizedR + normalizedG + normalizedB) / 3];
+}
+
+function hueDistance(a: number, b: number): number {
+    const diff = Math.abs(a - b);
+    return Math.min(diff, 1 - diff);
+}
+
+function getShapeMetric(diffs: [number, number, number], tolerances: [number, number, number], shape: number): number {
+    const scaled = diffs.map((diff, index) => diff / Math.max(0.0001, tolerances[index])) as [number, number, number];
+    if (shape <= 0.1) return Math.max(...scaled);
+    if (shape >= 0.9) return scaled[0] + scaled[1] + scaled[2];
+    return Math.sqrt(scaled[0] * scaled[0] + scaled[1] * scaled[1] + scaled[2] * scaled[2]);
+}
+
+function getChromaKeyStrength(r: number, g: number, b: number, chroma: ShotcutVideoFilters['chromaKeyAdvanced'], keyRgb: [number, number, number]): number {
+    const pixelValues = chroma.colorSpace === 1 ? rgbToHci(r, g, b) : [r / 255, g / 255, b / 255] as [number, number, number];
+    const keyValues = chroma.colorSpace === 1 ? rgbToHci(keyRgb[0], keyRgb[1], keyRgb[2]) : [keyRgb[0] / 255, keyRgb[1] / 255, keyRgb[2] / 255] as [number, number, number];
+    const diffs: [number, number, number] = chroma.colorSpace === 1
+        ? [hueDistance(pixelValues[0], keyValues[0]), Math.abs(pixelValues[1] - keyValues[1]), Math.abs(pixelValues[2] - keyValues[2])]
+        : [Math.abs(pixelValues[0] - keyValues[0]), Math.abs(pixelValues[1] - keyValues[1]), Math.abs(pixelValues[2] - keyValues[2])];
+    const metric = getShapeMetric(diffs, [chroma.deltaR, chroma.deltaG, chroma.deltaB], chroma.shape);
+    const edgeSoftness = chroma.edge <= 0.05 ? 0 : (1 - Math.min(chroma.edge, 0.95)) * 0.35 + chroma.slope;
+
+    if (metric <= 1) return 1;
+    if (edgeSoftness <= 0) return 0;
+    return Math.max(0, Math.min(1, 1 - (metric - 1) / edgeSoftness));
+}
+
+function applyImageBackgroundAlphaPreview(data: ImageData, options: ImageBackgroundAlphaPreview) {
+    if (!options.enabled) return;
+    const keyRgb = hexToRgb(options.keyColor);
+    if (!keyRgb) return;
+
+    for (let i = 0; i < data.data.length; i += 4) {
+        const distance = Math.hypot(data.data[i] - keyRgb[0], data.data[i + 1] - keyRgb[1], data.data[i + 2] - keyRgb[2]);
+        if (distance <= options.tolerance) {
+            data.data[i + 3] = 0;
+        } else if (options.softness > 0 && distance <= options.tolerance + options.softness) {
+            const factor = (distance - options.tolerance) / options.softness;
+            data.data[i + 3] = Math.round(data.data[i + 3] * factor);
+        }
+    }
+}
+
+function buildCanvasPreviewOptions(
+    cssFilter: string,
+    filters: ShotcutVideoFilters,
+    chromaMaskDataUrl?: string,
+    imageBackgroundAlpha?: ImageBackgroundAlphaPreview
+): ShotcutPreviewOptions {
+    return { cssFilter, filters, chromaMaskDataUrl, imageBackgroundAlpha };
 }
 
 function applyApproximateShotcutPreview(data: ImageData, options: ShotcutPreviewOptions, maskData?: Uint8ClampedArray) {
@@ -585,8 +660,6 @@ function applyApproximateShotcutPreview(data: ImageData, options: ShotcutPreview
     const chromaRgb = chroma.enabled ? hexToRgb(chroma.keyColor) : null;
     const spillRgb = spill.enabled ? hexToRgb(spill.keyColor) : null;
     const targetRgb = spill.enabled ? hexToRgb(spill.targetColor) : null;
-    const chromaTolerance = Math.max(1, ((chroma.deltaR + chroma.deltaG + chroma.deltaB) / 3) * 442);
-    const chromaSoftness = Math.max(1, chroma.slope * 255);
     const spillTolerance = Math.max(1, spill.tolerance * 442);
     const spillSoftness = Math.max(1, spill.slope * 255);
 
@@ -597,16 +670,9 @@ function applyApproximateShotcutPreview(data: ImageData, options: ShotcutPreview
         const b = data.data[i + 2];
 
         if (chromaRgb && maskAllowsChroma) {
-            const distance = Math.hypot(r - chromaRgb[0], g - chromaRgb[1], b - chromaRgb[2]);
-            const keyed = distance <= chromaTolerance;
-            const softKey = distance <= chromaTolerance + chromaSoftness;
-
-            if (chroma.invert ? !keyed : keyed) {
-                data.data[i + 3] = 0;
-            } else if (softKey) {
-                const edgeAlpha = Math.max(0, Math.min(1, (distance - chromaTolerance) / chromaSoftness));
-                data.data[i + 3] = Math.round(data.data[i + 3] * edgeAlpha);
-            }
+            const selectedStrength = getChromaKeyStrength(r, g, b, chroma, chromaRgb);
+            const keyStrength = chroma.invert ? 1 - selectedStrength : selectedStrength;
+            if (keyStrength > 0) data.data[i + 3] = Math.round(data.data[i + 3] * (1 - keyStrength));
         }
 
         if (spillRgb && targetRgb) {
@@ -620,10 +686,18 @@ function applyApproximateShotcutPreview(data: ImageData, options: ShotcutPreview
         }
 
         if (alpha.enabled) {
-            if (alpha.operation >= 0.8 && data.data[i + 3] / 255 < alpha.threshold) {
-                data.data[i + 3] = 0;
-            } else {
-                data.data[i + 3] = Math.round(data.data[i + 3] * Math.max(0, Math.min(1, alpha.amount * 2)));
+            const currentAlpha = data.data[i + 3];
+            const amount = Math.max(0, Math.min(1, alpha.amount));
+            if (alpha.operation === 0) {
+                data.data[i + 3] = currentAlpha;
+            } else if (alpha.operation >= 0.79 && alpha.operation < 0.9) {
+                data.data[i + 3] = currentAlpha / 255 < alpha.threshold ? 0 : 255;
+            } else if (alpha.operation <= 0.4) {
+                data.data[i + 3] = Math.max(0, Math.round(currentAlpha - amount * 255));
+            } else if (alpha.operation >= 0.6 && alpha.operation < 0.8) {
+                data.data[i + 3] = Math.min(255, Math.round(currentAlpha + amount * 255 * (1 - currentAlpha / 255)));
+            } else if (alpha.operation >= 1) {
+                data.data[i + 3] = Math.round(currentAlpha * (1 - amount) + 255 * amount);
             }
             if (alpha.invert) data.data[i + 3] = 255 - data.data[i + 3];
         }
@@ -1427,19 +1501,19 @@ function OverlayToggles({
             <Tooltip title={t('graphics.tooltip.silhouette', language)} arrow>
                 <FormControlLabel
                     control={<Checkbox checked={overlays.silhouette} onChange={(event) => onChange({ ...overlays, silhouette: event.target.checked })} />}
-                    label={<Typography sx={{ fontSize: 13 }}>Silhouette (S)</Typography>}
+                    label={<Typography sx={{ fontSize: 13 }}>{t('graphics.overlay.silhouette', language)} (S)</Typography>}
                 />
             </Tooltip>
             <Tooltip title={t('graphics.tooltip.guide', language)} arrow>
                 <FormControlLabel
                     control={<Checkbox checked={overlays.guide} onChange={(event) => onChange({ ...overlays, guide: event.target.checked })} />}
-                    label={<Typography sx={{ fontSize: 13 }}>Guide (G)</Typography>}
+                    label={<Typography sx={{ fontSize: 13 }}>{t('graphics.overlay.guide', language)} (G)</Typography>}
                 />
             </Tooltip>
             <Tooltip title={t('graphics.tooltip.alphaView', language)} arrow>
                 <FormControlLabel
                     control={<Checkbox checked={overlays.alphaView} onChange={(event) => onChange({ ...overlays, alphaView: event.target.checked })} />}
-                    label={<Typography sx={{ fontSize: 13 }}>Alpha view (A)</Typography>}
+                    label={<Typography sx={{ fontSize: 13 }}>{t('graphics.overlay.alphaView', language)} (A)</Typography>}
                 />
             </Tooltip>
             <Tooltip title={t('graphics.tooltip.maskView', language)} arrow>
@@ -1814,7 +1888,9 @@ function CanvasFilteredMedia({
             if (
                 preview.filters.chromaKeyAdvanced.enabled ||
                 preview.filters.keySpillAdvanced.enabled ||
-                preview.filters.alphaChannelAdjust.enabled
+                preview.filters.alphaChannelAdjust.enabled ||
+                preview.filters.colorGrading.enabled ||
+                preview.imageBackgroundAlpha?.enabled
             ) {
                 try {
                     const data = ctx.getImageData(0, 0, targetWidth, targetHeight);
@@ -1831,6 +1907,9 @@ function CanvasFilteredMedia({
                         }
                     }
                     applyApproximateShotcutPreview(data, preview, maskData);
+                    if (preview.imageBackgroundAlpha?.enabled) {
+                        applyImageBackgroundAlphaPreview(data, preview.imageBackgroundAlpha);
+                    }
                     ctx.putImageData(data, 0, 0);
                 } catch {
                     // If a media source cannot be sampled by canvas, keep the CSS-only preview alive.
@@ -2023,6 +2102,7 @@ function PortraitCanvas({
     onChromaMaskChange,
     previewFilter = '',
     shotcutPreviewFilters,
+    language = DEFAULT_LANGUAGE,
 }: {
     media: GraphicsFile | null;
     mediaKind: 'video' | 'image';
@@ -2035,6 +2115,7 @@ function PortraitCanvas({
     onChromaMaskChange?: (mask: ChromaMaskState) => void;
     previewFilter?: string;
     shotcutPreviewFilters?: ShotcutPreviewOptions;
+    language?: LanguageCode;
 }) {
     return (
         <Box
@@ -2085,7 +2166,7 @@ function PortraitCanvas({
             ) : (
                 <Stack sx={{ height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--text-color-light)' }}>
                     <VisibilityIcon />
-                    <Typography sx={{ mt: 1, fontSize: 13 }}>Load a source to align portrait output</Typography>
+                    <Typography sx={{ mt: 1, fontSize: 13 }}>{t('graphics.canvas.loadSource', language)}</Typography>
                 </Stack>
             )}
 
@@ -2565,6 +2646,7 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
                         transform={transform}
                         overlays={overlays}
                         assets={assets}
+                        language={currentLanguage}
                         onPlaybackState={handlePlaybackState}
                         onVideoControllerReady={handleVideoControllerReady}
                         chromaMask={chromaMask}
@@ -2781,6 +2863,12 @@ function ImageTool({ assets }: { assets: GraphicsAssets | null }) {
     const [operationState, setOperationState] = useState<OperationState>('idle');
     const [operationMessage, setOperationMessage] = useState('');
     const [dragActive, setDragActive] = useState(false);
+    const imagePreviewFilters = buildCanvasPreviewOptions('', DEFAULT_SHOTCUT_FILTERS, undefined, {
+        enabled: removeBackground,
+        keyColor,
+        tolerance,
+        softness,
+    });
 
     useOverlayShortcuts(setOverlays);
 
@@ -2931,7 +3019,15 @@ function ImageTool({ assets }: { assets: GraphicsAssets | null }) {
                         <OverlayToggles overlays={overlays} onChange={setOverlays} language={currentLanguage} />
                     </Stack>
 
-                    <PortraitCanvas media={source} mediaKind="image" transform={transform} overlays={overlays} assets={assets} />
+                    <PortraitCanvas
+                        media={source}
+                        mediaKind="image"
+                        transform={transform}
+                        overlays={overlays}
+                        assets={assets}
+                        language={currentLanguage}
+                        shotcutPreviewFilters={imagePreviewFilters}
+                    />
 
                     <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
                         <Button variant="outlined" startIcon={<AutoFixHighIcon />} sx={outlinedButtonSx} disabled={!source} onClick={handleApplyBackgroundRemoval}>
@@ -3249,7 +3345,7 @@ export default function GraphicsTool() {
     return (
         <Box>
             <Typography variant="h5" sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
-                {t('graphics.title', currentLanguage)}
+                {t('nav.visualForge', currentLanguage)}
             </Typography>
             <Typography sx={{ mt: 0.5, color: 'var(--text-color-light)' }}>
                 {t('graphics.subtitle', currentLanguage)}

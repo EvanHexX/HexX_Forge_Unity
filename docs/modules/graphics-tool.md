@@ -1,5 +1,12 @@
 # Graphics Tool
 
+## 2026-05-11 Preview Filter Policy
+
+- Video Tool preview는 FFmpeg/frei0r를 실시간 실행하지 않고 visible canvas 크기의 renderer canvas pass로 근사한다.
+- canvas pass 실행 조건에는 `Chroma Key: Advanced`, `Key Spill: Advanced`, `Alpha Channel: Adjust`, `Color Grading`, Image Tool `Background alpha`가 모두 포함되어야 한다.
+- Image Tool `Background alpha`는 preview와 export가 같은 key color/tolerance/softness 기준을 사용한다.
+- `config/graphics_presets.json`의 filter/color preset labels는 UI에 직접 노출되므로 `en`, `ko`, `zh-CN` 문자열을 UTF-8로 유지한다.
+
 ## 2026-05-11 Seek-Then-Play Policy
 
 - `VideoPreviewController.seek(seconds)`는 `Promise<void>`를 반환한다.

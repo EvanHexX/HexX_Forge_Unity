@@ -10,6 +10,7 @@ import {
     ListItemText,
     Typography
 } from '@mui/material';
+import { useEffect, useState, type ReactNode } from 'react';
 import HomeIcon from '@mui/icons-material/Home';
 import ExtensionIcon from '@mui/icons-material/Extension';
 import InventoryIcon from '@mui/icons-material/Inventory';
@@ -19,6 +20,8 @@ import MenuOpenIcon from '@mui/icons-material/MenuOpen';
 import BrushIcon from '@mui/icons-material/Brush';
 import MemoryIcon from '@mui/icons-material/Memory';
 import type { Page } from '../App';
+import ShinyText from './ShinyText';
+import { getSafeLanguage, t, type I18nKey, type LanguageCode } from '../i18n';
 
 type Props = {
     open: boolean;
@@ -27,19 +30,26 @@ type Props = {
     onChangePage: (page: Page) => void;
 };
 
-const menus = [
-    { page: 'home', label: 'Home', icon: <HomeIcon /> },
-    { page: 'mod', label: 'Mod Manager', icon: <ExtensionIcon /> },
-    { page: 'asset', label: 'Asset Manager', icon: <InventoryIcon /> },
-    { page: 'graphics', label: 'Graphics Tool', icon: <BrushIcon /> },
-    { page: 'cheat', label: 'Cheat Engine', icon: <MemoryIcon /> },
-    { page: 'optimizer', label: 'Optimizer', icon: <AutoFixHighIcon /> },
-    { page: 'settings', label: 'Settings', icon: <SettingsIcon /> }
-] as const;
+const menus: { page: Page; labelKey?: I18nKey; label?: string; icon: ReactNode }[] = [
+    { page: 'home', labelKey: 'nav.forgeHub', icon: <HomeIcon /> },
+    { page: 'mod', labelKey: 'nav.modForge', icon: <ExtensionIcon /> },
+    { page: 'asset', labelKey: 'nav.assetForge', icon: <InventoryIcon /> },
+    { page: 'graphics', labelKey: 'nav.visualForge', icon: <BrushIcon /> },
+    { page: 'cheat', labelKey: 'nav.coreLab', icon: <MemoryIcon /> },
+    { page: 'optimizer', labelKey: 'nav.synthesisLab', icon: <AutoFixHighIcon /> },
+    { page: 'settings', labelKey: 'nav.settings', icon: <SettingsIcon /> }
+];
 
 export default function Sidebar({ open, currentPage, onToggle, onChangePage }: Props) {
     const SIDEBAR_WIDTH = 240;
     const COLLAPSED_WIDTH = 54;
+    const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>('en');
+
+    useEffect(() => {
+        window.electronAPI.getSettings().then((settings) => {
+            setCurrentLanguage(getSafeLanguage(settings.language));
+        });
+    }, [currentPage]);
 
     return (
         <Box
@@ -73,7 +83,7 @@ export default function Sidebar({ open, currentPage, onToggle, onChangePage }: P
                         pointerEvents: 'none'
                     }}
                 >
-                    HexX Forge
+                    <ShinyText text="HexX Forge" speed={4.8} />
                 </Typography>
 
                 <IconButton
@@ -128,7 +138,7 @@ export default function Sidebar({ open, currentPage, onToggle, onChangePage }: P
 
                             {/* ✅ 텍스트 영역: 아이콘 뒤에서 자연스럽게 나타남 */}
                             <ListItemText
-                                primary={menu.label}
+                                primary={menu.labelKey ? t(menu.labelKey, currentLanguage) : menu.label}
                                 sx={{
                                     m: 0,
                                     opacity: open ? 1 : 0,

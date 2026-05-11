@@ -39,6 +39,7 @@ import {
 } from '@mui/material';
 import { useTextureCatalog } from '../hooks/useTextureCatalog';
 import { useNotification } from '../context/NotificationContext';
+import { getSafeLanguage, t, type LanguageCode } from '../i18n';
 
 type BackupStatus = {
     font: BackupStatusItem | string | null;
@@ -402,6 +403,7 @@ export default function AssetManager() {
     const { showNotification } = useNotification();
     const { data: catalog, loading } = useTextureCatalog();
 
+    const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>('en');
     const [status, setStatus] = useState<BackupStatus>({ font: null, asset: null });
     const [fontChecked, setFontChecked] = useState(true);
     const [assetChecked, setAssetChecked] = useState(true);
@@ -448,6 +450,9 @@ export default function AssetManager() {
     };
 
     useEffect(() => {
+        window.electronAPI.getSettings().then((settings) => {
+            setCurrentLanguage(getSafeLanguage(settings.language));
+        });
         loadStatus().catch((err) => showError(err, '백업 상태 로드 실패'));
         loadPacks().catch((err) => showError(err, '어셋팩 목록 로드 실패'));
         loadFontTargets().catch((err) => showError(err, '폰트 목록 로드 실패'));
@@ -918,7 +923,7 @@ export default function AssetManager() {
     return (
         <Box>
             <Typography variant="h5" sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
-                어셋 관리자
+                {t('nav.assetForge', currentLanguage)}
             </Typography>
 
             <Paper sx={sectionPaperSx}>

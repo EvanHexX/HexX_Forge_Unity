@@ -143,7 +143,7 @@ export function registerModIpc(): void {
                 description: string;
                 packageType: 'collection' | 'single';
                 version?: string;
-                dependency?: { target: string; displayName?: string };
+                dependency?: { target: string; displayName?: string; installBase?: string };
                 files: Array<{
                     entryName: string;
                     type: ModFileType;
@@ -169,7 +169,7 @@ export function registerModIpc(): void {
                 description: string;
                 packageType: 'collection' | 'single';
                 version?: string;
-                dependency?: { target: string; displayName?: string };
+                dependency?: { target: string; displayName?: string; installBase?: string };
                 files: Array<{ filePath: string; name: string; author: string }>;
             }
         ) => createAndImportPackage(data)
@@ -213,7 +213,7 @@ export function registerModIpc(): void {
                 description: string;
                 packageType: 'collection' | 'single';
                 version?: string;
-                dependency?: { target: string; displayName?: string };
+                dependency?: { target: string; displayName?: string; installBase?: string };
                 files: Array<{ filePath: string; name: string; author: string }>;
                 settingsScript?: ScriptConfig | null;
                 sources?: Array<{
@@ -229,6 +229,7 @@ export function registerModIpc(): void {
                         name?: string;
                         author?: string;
                         dependsOn?: string;
+                        contentTextOverride?: string;
                     }>;
                 }>;
                 savePath: string;

@@ -41,6 +41,7 @@ export type ModFileInfo = {
 export type PackageDependency = {
     target: string;
     displayName?: string;
+    installBase?: string;
 };
 
 export type PackageMeta = {
@@ -76,6 +77,7 @@ export type ModPackage = {
     dependency?: PackageDependency;
     dependencyState?: 'ok' | 'missing' | 'disabled';
     dependencyParentId?: string;
+    installPathHints?: string[];
     version?: string;
     source?: ModPackageSource;
 };
@@ -99,7 +101,7 @@ export type ScriptField = {
     label: string;
     ui_type: ScriptFieldType;
     target?: { type: 'cfg'; path: string; section: string; key: string };
-    default?: boolean | string;
+    default?: boolean | string | number;
     value?: string | number | boolean;
     options?: Array<{ label: string; value: string }>;
     min?: number;
@@ -251,6 +253,7 @@ type PackModSource = {
         name?: string;
         author?: string;
         dependsOn?: string;
+        contentTextOverride?: string;
     }>;
 };
 
@@ -543,6 +546,62 @@ function suggestFileType(entryName: string, isDirectory: boolean): ModFileType {
     return 'asset';
 }
 
+function isBepInExRootedPath(relativePath: string): boolean {
+    const top = normalizeRelativePath(relativePath).split('/')[0]?.toLowerCase();
+    return top === 'plugins' || top === 'config' || top === 'patchers';
+}
+
+function getPackageInstallBase(pkgMeta: PackageMeta): string {
+    const installBase = normalizeRelativePath(pkgMeta.dependency?.installBase ?? '').replace(/\/+$/, '');
+    if (!installBase || path.isAbsolute(installBase) || installBase.includes('..')) return '';
+    return installBase;
+}
+
+function sanitizePackageDependency(dependency?: PackageDependency): PackageDependency | undefined {
+    if (!dependency?.target?.trim()) return undefined;
+    const installBase = normalizeRelativePath(dependency.installBase ?? '').replace(/\/+$/, '');
+    return {
+        target: dependency.target.trim(),
+        displayName: dependency.displayName?.trim() || undefined,
+        installBase:
+            installBase && !path.isAbsolute(installBase) && !installBase.includes('..')
+                ? installBase
+                : undefined,
+    };
+}
+
+function getDeployRelativePath(pkgMeta: PackageMeta, file: Pick<ModFileInfo, 'path' | 'type'>): string {
+    const normalizedPath = normalizeRelativePath(file.path).replace(/\/+$/, '');
+    if (file.type !== 'script' && file.type !== 'mod-info' && file.type !== 'dll' && !isBepInExRootedPath(normalizedPath)) {
+        const installBase = getPackageInstallBase(pkgMeta);
+        if (installBase) return normalizeRelativePath(path.posix.join(installBase, normalizedPath));
+    }
+    return normalizedPath;
+}
+
+function collectInstallPathHints(pkgMeta: PackageMeta): string[] {
+    const protectedTopLevel = new Set(['plugins', 'config', 'patchers']);
+    const hints = new Set<string>();
+    const addHint = (value: string, includeSelf = false) => {
+        const normalized = normalizeRelativePath(value).replace(/\/+$/, '');
+        if (!normalized) return;
+        const parts = normalized.split('/').filter(Boolean);
+        const max = includeSelf ? parts.length : parts.length - 1;
+        for (let i = 1; i <= max; i++) {
+            const hint = parts.slice(0, i).join('/');
+            if (!hint || protectedTopLevel.has(hint.toLowerCase())) continue;
+            hints.add(hint);
+        }
+    };
+    for (const file of pkgMeta.files) {
+        addHint(file.path, file.type === 'folder');
+    }
+    for (const dllPath of pkgMeta.dllPaths) {
+        addHint(dllPath);
+    }
+    return [...hints].sort((a, b) => a.localeCompare(b));
+}
+
 // Deploy package non-DLL files to game directory
 function deployPackageFiles(pkgMeta: PackageMeta, pkgDir: string): void {
     const bepInExDir = getBepInExDir();
@@ -551,14 +610,8 @@ function deployPackageFiles(pkgMeta: PackageMeta, pkgDir: string): void {
         const src = path.join(pkgDir, file.path);
         if (!fs.existsSync(src)) continue;
 
-        if (file.type === 'config' && bepInExDir) {
-            const dst = path.join(bepInExDir, file.path);
-            if (!fs.existsSync(dst)) {
-                ensureParentDir(dst);
-                fs.copyFileSync(src, dst);
-            }
-        } else if (file.type === 'asset' && bepInExDir) {
-            const dst = path.join(bepInExDir, file.path);
+        if ((file.type === 'config' || file.type === 'asset') && bepInExDir) {
+            const dst = resolveBepInExRelative(getDeployRelativePath(pkgMeta, file));
             if (!fs.existsSync(dst)) {
                 ensureParentDir(dst);
                 fs.copyFileSync(src, dst);
@@ -644,6 +697,7 @@ export function scanMods(): ModPackage[] {
             dependency: pkgMeta.dependency,
             dependencyState: dependency.state,
             dependencyParentId: dependency.parentId,
+            installPathHints: collectInstallPathHints(pkgMeta),
             version: pkgMeta.version,
             source: pkgMeta.source,
         });
@@ -725,7 +779,7 @@ export function setPackageEnabled(packageId: string, enabled: boolean): { packag
     if (!enabled && pkgMeta) {
         const folderPaths = pkgMeta.files
             .filter((file) => file.type === 'folder')
-            .map((file) => file.path);
+            .map((file) => getDeployRelativePath(pkgMeta, file));
         if (folderPaths.length > 0) tryDeleteFolders(folderPaths, bepInExDir);
     }
 
@@ -785,7 +839,7 @@ export function deletePackage(packageId: string): ModPackage[] {
             throw new Error(`활성화된 종속 모드가 있습니다. 먼저 비활성화하거나 삭제해 주세요: ${dependents.map((item) => item.name).join(', ')}`);
         }
         dllPaths = pkg.dllPaths;
-        folderPaths = pkg.files.filter((f) => f.type === 'folder').map((f) => f.path);
+        folderPaths = pkg.files.filter((f) => f.type === 'folder').map((f) => getDeployRelativePath(pkg, f));
 
         const pkgDir = path.join(PACKAGES_DIR, packageId);
         if (fs.existsSync(pkgDir)) {
@@ -1027,7 +1081,7 @@ export function importZipMod(filePath: string, metadata: ImportPackageMetadata =
         dllPaths,
         files: infoFiles,
         enabled: false,
-        dependency: info.dependency,
+        dependency: sanitizePackageDependency(info.dependency),
         version: metadata.version || info.version,
         source: metadata.source,
     };
@@ -1146,7 +1200,7 @@ export function importZipWithConfig(
             dependsOn: f.dependsOn,
         })),
         enabled: false,
-        dependency: config.dependency,
+        dependency: sanitizePackageDependency(config.dependency),
         version: config.version,
     };
 
@@ -1211,7 +1265,7 @@ export function createAndImportPackage(data: {
         description: data.description,
         packageType: data.packageType,
         version: data.version,
-        dependency: data.dependency,
+        dependency: sanitizePackageDependency(data.dependency),
         files: infoFiles,
     };
     zip.addFile('mod-info.json', Buffer.from(JSON.stringify(modInfo, null, 2)));
@@ -1309,7 +1363,11 @@ function packModFromSources(data: {
                         : null);
                 if (!sourceEntry || sourceEntry.isDirectory) continue;
 
-                const writtenPath = addUniqueZipFile(zip, file.entryName, sourceEntry.getData());
+                const fileData =
+                    typeof file.contentTextOverride === 'string'
+                        ? Buffer.from(file.contentTextOverride, 'utf-8')
+                        : sourceEntry.getData();
+                const writtenPath = addUniqueZipFile(zip, file.entryName, fileData);
                 sourceInfoFiles.push({
                     path: writtenPath,
                     name: file.name,
@@ -1350,7 +1408,7 @@ function packModFromSources(data: {
         description: data.description,
         packageType: data.packageType,
         version: data.version,
-        dependency: data.dependency,
+        dependency: sanitizePackageDependency(data.dependency),
         files: topInfoFiles,
     };
     if (data.settingsScript) {
@@ -1395,7 +1453,7 @@ export function packMod(data: {
             description: data.description,
             packageType: data.packageType,
             version: data.version,
-            dependency: data.dependency,
+            dependency: sanitizePackageDependency(data.dependency),
             sources: data.sources,
             settingsScript: data.settingsScript,
             savePath: data.savePath,
@@ -1451,7 +1509,7 @@ export function packMod(data: {
         description: data.description,
         packageType: data.packageType,
         version: data.version,
-        dependency: data.dependency,
+        dependency: sanitizePackageDependency(data.dependency),
         files: infoFiles,
     };
     if (data.settingsScript) {
@@ -1500,7 +1558,7 @@ export function inspectZip(zipPath: string): ZipInspectResult {
                 description: parsedInfo.description || '',
                 packageType: parsedInfo.packageType || 'single',
                 version: parsedInfo.version,
-                dependency: parsedInfo.dependency,
+                dependency: sanitizePackageDependency(parsedInfo.dependency),
             };
         } catch {
             warnings.push('mod-info.json 파싱 실패 — 손상된 파일일 수 있습니다.');

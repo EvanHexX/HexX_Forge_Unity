@@ -1,5 +1,25 @@
 # Mod Manager
 
+## 2026-05-11 Linked JSON reconcile in Mod Packing
+
+- Mod Packing Step 3의 `file_manager`는 linked JSON 설정 후 현재 Step 2 asset 목록과 JSON object map을 비교한다.
+- JSON에는 있지만 현재 패킹 asset에는 없는 key는 제거 후보로 표시한다. 제거 후보는 기본 선택 상태이며, `선택 항목 적용`을 눌렀을 때만 패킹용 JSON editor에서 삭제된다.
+- 현재 패킹 asset에는 있지만 JSON에는 없는 key는 추가 후보로 표시한다. 추가 후보는 기본 미선택 상태이며, 사용자가 선택한 항목만 object map에 생성한다.
+- 추가 후보를 체크하면 해당 후보 아래에 metadata 입력 폼이 열린다. 후보마다 `displayName`, `lv`, `tags` 같은 값을 다르게 입력할 수 있고, 입력값은 패킹 출력 JSON의 해당 key에만 적용된다.
+- 비교 key는 `linkedConfigTargetPath`와 `linkedConfigKeyTemplate` 기준이다. `$` placeholder는 asset file name으로 치환한다.
+- 이 기능은 원본 ZIP/원본 JSON 파일을 수정하지 않는다. renderer가 해당 ZIP entry에 `contentTextOverride`를 붙이고, `packModFromSources`가 패킹 ZIP을 만들 때 override text를 UTF-8 JSON으로 기록한다.
+- 추가 entry의 metadata object는 후보별 입력값을 우선 사용하고, 비어 있는 값은 기존 예시 entry와 `linkedConfigFieldDefaults`를 fallback template으로 사용한다. filter key/value가 설정되어 있으면 생성 object에도 반영한다.
+
+## 2026-05-11 Dependency Install Base
+
+- 종속 모드는 `dependency.installBase`를 선택적으로 가질 수 있다. 값은 BepInEx 기준 상대경로이며 예시는 `plugins/ResourceInjector/pack`이다.
+- `dependency.installBase`가 있는 종속 모드에서 `script`, `mod-info`, `dll`을 제외한 배포 파일/folder의 `path`가 `test.png`처럼 상대 경로이면 활성화 시 `{gamePath}/BepInEx/{installBase}/test.png`로 배포한다.
+- `files[].path`가 이미 `plugins/`, `config/`, `patchers/`로 시작하면 BepInEx 기준 절대 상대경로로 간주하고 `installBase`를 중복 적용하지 않는다.
+- Mod Packing Step 1은 선택한 main mod의 `files[].path`, `dllPaths`, `folder` metadata에서 parent folder 후보를 추론해 설치 기준 경로 후보로 보여준다. 후보가 없어도 사용자는 직접 입력할 수 있다.
+- Mod Packing Step 3의 `file_manager.targetDir`은 종속 모드에서도 BepInEx 기준 상대경로다. 종속 설치 기준이 있으면 `종속 설치 기준 사용` 버튼으로 `dependency.installBase` 값을 `targetDir`에 복사할 수 있다.
+- 종속 설치 기준이 있는 file_manager에서 linked JSON을 선택하면, `banana_zero_pack/pack_info.json` 같은 상대 JSON path는 `plugins/ResourceInjector/packs/banana_zero_pack/pack_info.json`처럼 최종 BepInEx 기준 `linkedConfigPath`로 저장한다.
+- DLL 위치 변경은 v1 범위가 아니다. DLL enable/disable은 기존 `plugins/*.dll` 규칙을 유지한다.
+
 ## 🎯 목적
 
 BepInEx 기반 DLL 모드를 관리한다.
@@ -386,6 +406,7 @@ type ZipEntryInfo = {
 - main mod 비활성화/삭제 시 활성화된 종속 모드가 있으면 먼저 종속 모드를 비활성화하거나 삭제하라는 오류로 차단한다.
 - DLL이 없는 asset-only package도 패키지로 유지한다. 이 경우 `dllPaths: []`와 package-level `enabled` flag로 활성 상태를 저장한다.
 - Mod Manager 목록은 main/root package를 먼저 보여주고, dependent package는 parent 아래 tree row로 들여쓴다. dependency expand state와 collection DLL expand state는 별도로 관리한다.
+- parent package의 dependency tree를 접으면 parent가 확인된 dependent package row와 그 DLL detail row는 함께 숨긴다. parent를 찾지 못한 orphan dependent만 root 위치에 남긴다.
 
 ## Package Version
 

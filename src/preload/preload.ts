@@ -108,7 +108,7 @@ const electronAPI = {
             description: string;
             packageType: 'collection' | 'single';
             version?: string;
-            dependency?: { target: string; displayName?: string };
+            dependency?: { target: string; displayName?: string; installBase?: string };
             files: Array<{
                 entryName: string;
                 type: string;
@@ -124,7 +124,7 @@ const electronAPI = {
         description: string;
         packageType: 'collection' | 'single';
         version?: string;
-        dependency?: { target: string; displayName?: string };
+        dependency?: { target: string; displayName?: string; installBase?: string };
         files: Array<{ filePath: string; name: string; author: string }>;
     }) => ipcRenderer.invoke('mods:create-and-import', data),
 
@@ -174,7 +174,7 @@ const electronAPI = {
         description: string;
         packageType: 'collection' | 'single';
         version?: string;
-        dependency?: { target: string; displayName?: string };
+        dependency?: { target: string; displayName?: string; installBase?: string };
         files: Array<{ filePath: string; name: string; author: string }>;
         settingsScript?: unknown;
         sources?: Array<{
@@ -190,6 +190,7 @@ const electronAPI = {
                 name?: string;
                 author?: string;
                 dependsOn?: string;
+                contentTextOverride?: string;
             }>;
         }>;
         savePath: string;

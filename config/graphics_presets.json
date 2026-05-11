@@ -17,7 +17,7 @@
     "filters": [
       {
         "id": "chromaKeyAdvanced",
-        "labels": { "en": "Chroma Key: Advanced", "ko": "크로마 키: 고급", "zh-CN": "色鍵：進階" },
+        "labels": { "en": "Chroma Key: Advanced", "ko": "크로마 키: 고급", "zh-CN": "色键：高级" },
         "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/select0r", "mltService": "frei0r.select0r" },
         "engine": "frei0r",
         "pluginFile": "select0r.dll",
@@ -26,7 +26,7 @@
       },
       {
         "id": "keySpillAdvanced",
-        "labels": { "en": "Key Spill: Advanced", "ko": "키 스필: 고급", "zh-CN": "色键溢色: 高级" },
+        "labels": { "en": "Key Spill: Advanced", "ko": "키 스필: 고급", "zh-CN": "色键溢色：高级" },
         "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/keyspillm0pup", "mltService": "frei0r.keyspillm0pup" },
         "engine": "frei0r",
         "pluginFile": "keyspillm0pup.dll",
@@ -35,7 +35,7 @@
       },
       {
         "id": "alphaChannelAdjust",
-        "labels": { "en": "Alpha Channel: Adjust", "ko": "알파 채널: 조정", "zh-CN": "透明通道: 调节" },
+        "labels": { "en": "Alpha Channel: Adjust", "ko": "알파 채널: 조정", "zh-CN": "透明通道：调节" },
         "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/alpha_adjust", "mltService": "frei0r.alpha0ps" },
         "engine": "frei0r",
         "pluginFile": "alpha0ps_alpha0ps.dll",
@@ -53,7 +53,7 @@
       },
       {
         "id": "contrast",
-        "labels": { "en": "Contrast", "ko": "대비", "zh-CN": "對比" },
+        "labels": { "en": "Contrast", "ko": "대비", "zh-CN": "对比" },
         "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/contrast", "mltService": "lift_gamma_gain" },
         "engine": "ffmpeg-native",
         "enabled": true,
@@ -62,7 +62,7 @@
       },
       {
         "id": "colorGrading",
-        "labels": { "en": "Color Grading", "ko": "색 보정", "zh-CN": "色彩分级" },
+        "labels": { "en": "Color Grading", "ko": "색 보정", "zh-CN": "颜色分级" },
         "shotcut": { "sourcePath": "references/shotcut-master/src/qml/filters/color", "mltService": "lift_gamma_gain" },
         "engine": "ffmpeg-native",
         "enabled": true,
@@ -71,7 +71,7 @@
           "gamma": { "r": 0, "g": 0, "b": 0 },
           "gain": { "r": 0, "g": 0, "b": 0 }
         },
-        "export": { "note": "Shotcut Color Grading is approximated with FFmpeg eq/colorchannelmixer in v1." }
+        "export": { "note": "Shotcut Color Grading is approximated with FFmpeg lutrgb in v1." }
       }
     ],
     "colorPresets": [

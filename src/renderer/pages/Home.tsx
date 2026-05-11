@@ -7,6 +7,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useNotification } from '../context/NotificationContext';
 import { getSafeLanguage, t, type I18nKey, type LanguageCode } from '../i18n';
+import ShinyText from '../components/ShinyText';
 
 type Props = {
     onOpenSettings: () => void;
@@ -20,7 +21,7 @@ type AssetStatus = Awaited<ReturnType<typeof window.electronAPI.getAssetStatus>>
 
 type DocCard = {
     id: string;
-    title: string;
+    titleKey: I18nKey;
     descKey: I18nKey;
     statusKey: I18nKey;
     docs: string;
@@ -32,7 +33,7 @@ const NEWS_RELEASE_LIMIT = 3;
 const docCards: DocCard[] = [
     {
         id: 'mod',
-        title: 'Mod Manager',
+        titleKey: 'nav.modForge',
         descKey: 'home.doc.mod.desc',
         statusKey: 'home.doc.mod.status',
         docs: 'docs/modules/mod-manager.md',
@@ -40,7 +41,7 @@ const docCards: DocCard[] = [
     },
     {
         id: 'asset',
-        title: 'Asset Manager',
+        titleKey: 'nav.assetForge',
         descKey: 'home.doc.asset.desc',
         statusKey: 'home.doc.asset.status',
         docs: 'docs/modules/asset-manager.md',
@@ -48,7 +49,7 @@ const docCards: DocCard[] = [
     },
     {
         id: 'graphics',
-        title: 'Graphics Tool',
+        titleKey: 'nav.visualForge',
         descKey: 'home.doc.graphics.desc',
         statusKey: 'home.doc.graphics.status',
         docs: 'docs/modules/graphics-tool.md',
@@ -56,7 +57,7 @@ const docCards: DocCard[] = [
     },
     {
         id: 'cheat',
-        title: 'Cheat Engine',
+        titleKey: 'nav.coreLab',
         descKey: 'home.doc.cheat.desc',
         statusKey: 'home.doc.cheat.status',
         docs: '',
@@ -64,7 +65,7 @@ const docCards: DocCard[] = [
     },
     {
         id: 'optimizer',
-        title: 'Optimizer',
+        titleKey: 'nav.synthesisLab',
         descKey: 'home.doc.optimizer.desc',
         statusKey: 'home.doc.optimizer.status',
         docs: '',
@@ -72,7 +73,7 @@ const docCards: DocCard[] = [
     },
     {
         id: 'settings',
-        title: 'Settings',
+        titleKey: 'nav.settings',
         descKey: 'home.doc.settings.desc',
         statusKey: 'home.doc.settings.status',
         docs: '',
@@ -150,9 +151,13 @@ export default function Home({ onOpenSettings }: Props) {
         <Box sx={{ color: 'var(--text-color)' }}>
             <Stack direction="row" spacing={2} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box>
+                    <Typography sx={{ color: 'var(--text-color-secondary)', fontSize: 12, fontWeight: 800, textTransform: 'uppercase' }}>
+                        {t('nav.forgeHub', currentLanguage)}
+                    </Typography>
                     <Stack direction="row" spacing={1.25} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-                        <Typography variant="h4" sx={{ fontWeight: 900, color: 'var(--text-color)' }}>
-                            HexX Forge v{version || '1.13.x'}-beta
+                        <Typography variant="h4" sx={{ fontWeight: 900, color: 'var(--text-color-light)' }}>
+                            <ShinyText
+                                text="HexX Forge" speed={4.8}/> v{version || '1.15.3-beta.0'}
                         </Typography>
                         <Chip
                             size="small"
@@ -296,7 +301,7 @@ export default function Home({ onOpenSettings }: Props) {
                                     <CardContent>
                                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
                                             <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                                                {card.title}
+                                                {t(card.titleKey, currentLanguage)}
                                             </Typography>
                                             <Chip size="small" label={t(card.statusKey, currentLanguage)} />
                                         </Stack>
@@ -334,7 +339,7 @@ export default function Home({ onOpenSettings }: Props) {
                                                     onClick={(event) => event.stopPropagation()}
                                                 >
                                                     <Typography sx={{ fontWeight: 800 }}>
-                                                        {card.title} {t('home.section.docs', currentLanguage)}
+                                                        {t(card.titleKey, currentLanguage)} {t('home.section.docs', currentLanguage)}
                                                     </Typography>
                                                     <Typography sx={{ mt: 1, color: 'var(--text-color-light)', fontSize: 13 }}>
                                                         {t('home.docs.connectedDocument', currentLanguage)} {card.docs || t('home.docs.notReady', currentLanguage)}

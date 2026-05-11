@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Box, Button, Fade, LinearProgress, Stack, Typography } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import splashLogo from '../assets/splash/Logo_without_title.png';
@@ -22,8 +23,8 @@ const modeCopy: Record<SplashMode, { title: string; fallbackMessage: string }> =
         fallbackMessage: 'Preparing update channel...'
     },
     preview: {
-        title: 'Splash Preview',
-        fallbackMessage: 'Optimizer preview mode'
+        title: 'Feature in Preparation',
+        fallbackMessage: 'This workspace is being prepared for a future beta.'
     }
 };
 
@@ -31,6 +32,20 @@ export default function SplashScreen({ open, mode, progress, message, onClose }:
     const copy = modeCopy[mode];
     const normalizedProgress = typeof progress === 'number' ? Math.max(0, Math.min(100, progress)) : undefined;
     const showProgress = mode === 'update' && typeof normalizedProgress === 'number';
+
+    useEffect(() => {
+        if (!open || !onClose) return;
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                onClose();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [onClose, open]);
 
     return (
         <Fade in={open} timeout={{ enter: 260, exit: 220 }} unmountOnExit>
@@ -40,7 +55,7 @@ export default function SplashScreen({ open, mode, progress, message, onClose }:
 
                 {onClose && (
                     <Button
-                        aria-label="Close splash preview"
+                        aria-label="Close preparation screen"
                         onClick={onClose}
                         sx={closeButtonSx}
                     >
@@ -116,12 +131,14 @@ const overlaySx = {
         '100%': { transform: 'translate(-50%, -50%) scale(0.78)', opacity: 0.42, filter: 'blur(14px)' }
     },
     '@keyframes glitchShift': {
-        '0%, 100%': { transform: 'translateX(0)', opacity: 0.05 },
-        '8%': { transform: 'translateX(-7px)', opacity: 0.58 },
-        '10%': { transform: 'translateX(5px)', opacity: 0.16 },
-        '28%': { transform: 'translateX(0)', opacity: 0.22 },
-        '54%': { transform: 'translateX(8px)', opacity: 0.52 },
-        '57%': { transform: 'translateX(-4px)', opacity: 0.3 }
+        '0%, 100%': { transform: 'translateX(0)', opacity: 0 },
+        '8%': { transform: 'translateX(-17px)', opacity: 0.58 },
+        '10%': { transform: 'translateX(15px)', opacity: 0.16 },
+        '20%': { transform: 'translateX(-14px)', opacity: 0.23 },
+        '28%': { transform: 'translateX(0)', opacity: 0.0 },
+        '54%': { transform: 'translateX(18px)', opacity: 0.52 },
+        '57%': { transform: 'translateX(-14px)', opacity: 0.3 },
+        '68%': { transform: 'translateX(-14px)', opacity: 0 }
     },
     '@keyframes arcRotate': {
         to: { transform: 'rotate(360deg)' }
