@@ -79,11 +79,13 @@ Shotcut uses `frei0r.saturat0r`. The UI percent is converted through `level / 80
 
 ### Contrast And Color Grading
 
-Shotcut uses MLT `lift_gamma_gain` or GPU `movit.lift_gamma_gain` for exact lift/gamma/gain behavior. HexX Forge does not bundle MLT in v1, so contrast and color grading are approximated with FFmpeg `eq` and `colorchannelmixer` expressions. Keep this limitation in documentation only; the UI should not show implementation caveats to the user.
+Shotcut uses MLT `lift_gamma_gain` or GPU `movit.lift_gamma_gain` for exact lift/gamma/gain behavior. HexX Forge does not bundle MLT in v1, so contrast is approximated with FFmpeg `eq`, and color grading is approximated with per-channel FFmpeg `lutrgb` expressions. Keep this limitation in documentation only; the UI should not show implementation caveats to the user.
 
 ## Renderer Preview
 
-Viewport preview is intentionally approximate. Saturation, contrast, color presets, and color grading use browser CSS filters where possible. Chroma key, key spill, and alpha channel adjustment use a renderer canvas pass over the visible preview size so filter changes appear immediately without running FFmpeg on every slider move. Export remains the source of truth and uses the FFmpeg/frei0r filtergraph.
+Viewport preview is intentionally approximate. Saturation, contrast, and color presets use browser CSS filters where possible. Chroma key, key spill, alpha channel adjustment, and color grading use a renderer canvas pass over the visible preview size so filter changes appear immediately without running FFmpeg on every slider move. Export remains the source of truth and uses the FFmpeg/frei0r filtergraph.
+
+Color Grading keeps the Shotcut `Shadows (Lift)`, `Midtones (Gamma)`, and `Highlights (Gain)` control model. Preview and export share the same per-channel approximation so the three grading groups do not collapse into one averaged brightness/contrast effect.
 
 ## Runtime Assets
 
@@ -108,6 +110,23 @@ Graphics Tool checks:
 - required plugin DLL files exist.
 
 If validation fails, frei0r filter rows stay visible but disabled and `NotificationContext` warns the user once instead of showing a persistent alert.
+
+## Release Health Check
+
+Before release, packaged builds must validate that FFmpeg can actually load the bundled frei0r plugins. File existence is not enough because `ffmpeg.exe` can be present and built with `--enable-frei0r` while still failing with `Could not find module 'select0r'` on a tester machine.
+
+Release validation should check:
+
+- `resources/tools/ffmpeg/ffmpeg.exe`
+- `resources/tools/ffmpeg/ffprobe.exe`
+- `resources/tools/frei0r/filter/select0r.dll`
+- `resources/tools/frei0r/filter/keyspillm0pup.dll`
+- `resources/tools/frei0r/filter/alpha0ps_alpha0ps.dll`
+- `resources/tools/frei0r/filter/saturat0r.dll`
+- `ffmpeg -filters` includes `frei0r`
+- a short `frei0r=select0r` dry-run succeeds with `FREI0R_PATH` pointing at `resources/tools/frei0r/filter`
+
+If a dry-run fails, Graphics Tool should disable affected frei0r filter rows and show a short `NotificationContext` warning. The full diagnostic payload should include the resolved FFmpeg path, frei0r path, missing files, and dry-run stderr so tester reports are actionable.
 
 ## Translation References
 

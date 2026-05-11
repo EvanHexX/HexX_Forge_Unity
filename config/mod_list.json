@@ -85,27 +85,6 @@
         }
       ]
     },
-    "758f7013-9c56-4fbf-9244-00589233cea1": {
-      "id": "758f7013-9c56-4fbf-9244-00589233cea1",
-      "name": "test2",
-      "author": "test2",
-      "description": "2tet",
-      "packageType": "single",
-      "dllPaths": [
-        "plugins/OwnedBookMark.dll"
-      ],
-      "files": [
-        {
-          "path": "mod-info.json",
-          "type": "mod-info"
-        },
-        {
-          "path": "plugins/OwnedBookMark.dll",
-          "type": "dll",
-          "author": "TestMod"
-        }
-      ]
-    },
     "1a4fb6aa-7df7-42df-9473-b0ac7ff3c69c": {
       "id": "1a4fb6aa-7df7-42df-9473-b0ac7ff3c69c",
       "name": "testc",
@@ -216,69 +195,6 @@
         }
       ]
     },
-    "6bd178c5-f1fb-4e27-b521-8d39ee5bd1d3": {
-      "id": "6bd178c5-f1fb-4e27-b521-8d39ee5bd1d3",
-      "name": "test",
-      "author": "etst",
-      "description": "test",
-      "packageType": "single",
-      "dllPaths": [
-        "plugins/ResourceInjector.dll"
-      ],
-      "files": [
-        {
-          "path": "plugins/ResourceInjector.dll",
-          "type": "dll",
-          "author": "etst"
-        },
-        {
-          "path": "plugins/ResourceInjector/portraits/bundles/testbundle.bundle",
-          "type": "asset",
-          "author": "etst"
-        },
-        {
-          "path": "plugins/ResourceInjector/portraits/png/pose7_resized.png",
-          "type": "asset",
-          "author": "etst"
-        },
-        {
-          "path": "plugins/ResourceInjector/portraits/webm/Final_1.webm",
-          "type": "asset",
-          "author": "etst"
-        },
-        {
-          "path": "plugins/settings.configurator.json",
-          "type": "script",
-          "author": "etst",
-          "dependsOn": "modpack"
-        },
-        {
-          "path": "plugins/ResourceInjector",
-          "type": "folder",
-          "author": "etst"
-        },
-        {
-          "path": "plugins/ResourceInjector/portraits",
-          "type": "folder",
-          "author": "etst"
-        },
-        {
-          "path": "plugins/ResourceInjector/portraits/bundles",
-          "type": "folder",
-          "author": "etst"
-        },
-        {
-          "path": "plugins/ResourceInjector/portraits/png",
-          "type": "folder",
-          "author": "etst"
-        },
-        {
-          "path": "plugins/ResourceInjector/portraits/webm",
-          "type": "folder",
-          "author": "etst"
-        }
-      ]
-    },
     "ef12b723-e19e-4f57-8ac2-1cf6877e1bbd": {
       "id": "ef12b723-e19e-4f57-8ac2-1cf6877e1bbd",
       "name": "ResourceInjector",
@@ -353,19 +269,205 @@
           "author": "HexX"
         }
       ]
+    },
+    "2eb14d6d-999a-44a0-9f65-764b485ec99f": {
+      "id": "2eb14d6d-999a-44a0-9f65-764b485ec99f",
+      "name": "fdhsh",
+      "author": "sdfg",
+      "description": "asdfg",
+      "packageType": "single",
+      "dllPaths": [
+        "plugins/ResourceInjector.dll"
+      ],
+      "files": [
+        {
+          "path": "mod-info.json",
+          "type": "mod-info"
+        },
+        {
+          "path": "plugins/ResourceInjector.dll",
+          "type": "dll",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/config/portrait_file_infos.json",
+          "type": "config",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/config/portrait_overrides.json",
+          "type": "config",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/bundles/testbundle.bundle",
+          "type": "asset",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/png/pose7_resized.png",
+          "type": "asset",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/webm/Final_1.webm",
+          "type": "asset",
+          "author": "sdfg"
+        },
+        {
+          "path": "settings.configurator.json",
+          "type": "script",
+          "dependsOn": "modpack"
+        },
+        {
+          "path": "plugins/ResourceInjector/",
+          "type": "folder"
+        },
+        {
+          "path": "plugins/ResourceInjector/config/",
+          "type": "folder"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/",
+          "type": "folder"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/bundles/",
+          "type": "folder"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/png/",
+          "type": "folder"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/webm/",
+          "type": "folder"
+        },
+        {
+          "path": "plugins/ResourceInjector",
+          "type": "folder",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/config",
+          "type": "folder",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/packs",
+          "type": "folder",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits",
+          "type": "folder",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/bundles",
+          "type": "folder",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/png",
+          "type": "folder",
+          "author": "sdfg"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/webm",
+          "type": "folder",
+          "author": "sdfg"
+        }
+      ]
+    },
+    "50d52582-ea02-4a4c-b919-21af9b41540c": {
+      "id": "50d52582-ea02-4a4c-b919-21af9b41540c",
+      "name": "특수 초상화 관리 모드",
+      "author": "HexX",
+      "description": "동적이미지, 정적이미지 등을 특수 초상화로 추가하여 사용할 수 있습니다.",
+      "packageType": "single",
+      "dllPaths": [],
+      "files": [
+        {
+          "path": "plugins/ResourceInjector.dll",
+          "type": "dll",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/config",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/config/portrait_file_infos.json",
+          "type": "config",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/config/portrait_overrides.json",
+          "type": "config",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/packs",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/bundles",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/bundles/hexxbundle.bundle",
+          "type": "asset",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/png",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/png/pose7_resized.png",
+          "type": "asset",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/webm",
+          "type": "folder",
+          "author": "HexX"
+        },
+        {
+          "path": "plugins/ResourceInjector/portraits/webm/Final_1.webm",
+          "type": "asset",
+          "author": "HexX"
+        },
+        {
+          "path": "settings.configurator.json",
+          "type": "script",
+          "dependsOn": "modpack"
+        }
+      ],
+      "enabled": false,
+      "version": "1.3.26"
     }
   },
   "mods": {
-    "plugins/OwnedBookMark.dll": {
-      "name": "OwnedBookMark.dll",
-      "author": "TestMod",
-      "packageId": "758f7013-9c56-4fbf-9244-00589233cea1"
-    },
     "plugins/ResourceInjector.dll": {
-      "name": "test",
-      "author": "etst",
-      "description": "test",
-      "packageId": "6bd178c5-f1fb-4e27-b521-8d39ee5bd1d3"
+      "name": "ResourceInjector.dll",
+      "author": "sdfg",
+      "packageId": "2eb14d6d-999a-44a0-9f65-764b485ec99f"
     }
   }
 }

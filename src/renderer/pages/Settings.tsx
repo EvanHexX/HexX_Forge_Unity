@@ -63,15 +63,18 @@ export default function Settings({
         const selectedGameId = settings?.selectedGameId || 'long-yin-li-zhi-zhuan';
         return supportedGames.find((game) => game.id === selectedGameId) || supportedGames[0];
     }, [settings?.selectedGameId, supportedGames]);
+    const currentLanguage = getSafeLanguage(settings?.language);
+    const selectedGameName = getGameDisplayName(selectedGame, currentLanguage);
+    const selectedGameInstallHint = getGameInstallHint(selectedGame, currentLanguage);
 
     const updateMessage = useMemo(() => {
-        if (!updateStatus) return '업데이트 상태를 불러오는 중입니다.';
+        if (!updateStatus) return t('settings.update.loading', currentLanguage);
         if (updateStatus.error) return updateStatus.error;
         if (updateStatus.message) return updateStatus.message;
-        if (updateStatus.state === 'idle') return '업데이트를 수동으로 확인할 수 있습니다.';
+        if (updateStatus.state === 'idle') return t('settings.update.idle', currentLanguage);
 
         return '';
-    }, [updateStatus]);
+    }, [currentLanguage, updateStatus]);
 
     const isChecking = updateStatus?.state === 'checking';
     const isDownloading = updateStatus?.state === 'downloading';
@@ -80,7 +83,6 @@ export default function Settings({
     const checkDisabled = isChecking || isDownloading;
     const downloadDisabled = !canDownload || isDownloading;
     const installDisabled = !canInstall;
-    const currentLanguage = getSafeLanguage(settings?.language);
 
     const handleSelectGame = async (gameId: string) => {
         const updated = await window.electronAPI.setSelectedGame(gameId);
@@ -122,12 +124,12 @@ export default function Settings({
     return (
         <Box sx={{ maxWidth: 760 }}>
             <Typography variant="h5" sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
-                환경설정
+                {t('settings.title', currentLanguage)}
             </Typography>
 
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1.5, mt: 4 }}>
                 <Box>
-                    <Typography sx={sectionLabel}>지원 게임</Typography>
+                    <Typography sx={sectionLabel}>{t('settings.section.supportedGame', currentLanguage)}</Typography>
                     <Select
                         value={settings?.selectedGameId || selectedGame?.id || 'long-yin-li-zhi-zhuan'}
                         onChange={(e) => handleSelectGame(e.target.value)}
@@ -136,13 +138,13 @@ export default function Settings({
                     >
                         {supportedGames.map((game) => (
                             <MenuItem key={game.id} value={game.id}>
-                                {game.displayName}
+                                {getGameDisplayName(game, currentLanguage)}
                             </MenuItem>
                         ))}
                     </Select>
                 </Box>
                 <Box>
-                    <Typography sx={sectionLabel}>테마</Typography>
+                    <Typography sx={sectionLabel}>{t('settings.section.theme', currentLanguage)}</Typography>
                     <Select
                         value={currentTheme}
                         onChange={(e) => changeTheme(e.target.value)}
@@ -157,7 +159,7 @@ export default function Settings({
                     </Select>
                 </Box>
                 <Box>
-                    <Typography sx={sectionLabel}>폰트</Typography>
+                    <Typography sx={sectionLabel}>{t('settings.section.typography', currentLanguage)}</Typography>
                     <Select
                         value={currentTypography}
                         onChange={(e) => changeTypography(e.target.value)}
@@ -189,10 +191,12 @@ export default function Settings({
             </Box>
 
             <Box sx={{ mt: 4 }}>
-                <Typography sx={sectionLabel}>게임 설치 폴더</Typography>
+                <Typography sx={sectionLabel}>{t('settings.section.gameInstallFolder', currentLanguage)}</Typography>
                 <Typography sx={{ color: 'var(--text-color-light)', fontSize: 13, mb: 1.5 }}>
-                    {selectedGame?.displayName || '선택한 게임'} 설치 폴더를 선택하세요.
-                    {selectedGame?.installFolderHint ? ` 예: ${selectedGame.installFolderHint}` : ''}
+                    {t('settings.gamePath.instructions.prefix', currentLanguage)}
+                    {selectedGameName || t('settings.game.selectedFallback', currentLanguage)}
+                    {t('settings.gamePath.instructions.suffix', currentLanguage)}
+                    {selectedGameInstallHint ? ` ${t('settings.gamePath.examplePrefix', currentLanguage)} ${selectedGameInstallHint}` : ''}
                 </Typography>
                 <Stack direction="row" spacing={1}>
                     <TextField
@@ -214,22 +218,22 @@ export default function Settings({
                         onClick={handleSelectPath}
                         sx={{ background: 'var(--button-bg-color)', color: 'var(--button-text-color)', flexShrink: 0 }}
                     >
-                        선택
+                        {t('settings.button.select', currentLanguage)}
                     </Button>
                 </Stack>
                 {!gamePath && (
                     <Typography sx={{ mt: 1, fontSize: 13, color: 'error.main' }}>
-                        {selectedGame?.displayName || '게임'} 설치 폴더가 설정되지 않았습니다.
+                        {selectedGameName || t('settings.game.fallback', currentLanguage)} {t('settings.gamePath.missingSuffix', currentLanguage)}
                     </Typography>
                 )}
             </Box>
 
             <Box sx={{ mt: 4 }}>
-                <Typography sx={sectionLabel}>앱 업데이트</Typography>
+                <Typography sx={sectionLabel}>{t('settings.section.appUpdate', currentLanguage)}</Typography>
                 <Stack spacing={1.5}>
                     <Typography sx={{ color: 'var(--text-color-light)', fontSize: 13 }}>
-                        현재 버전: {appVersion || updateStatus?.currentVersion || '-'}
-                        {updateStatus?.availableVersion ? ` / 최신 버전: ${updateStatus.availableVersion}` : ''}
+                        {t('settings.update.currentVersion', currentLanguage)} {appVersion || updateStatus?.currentVersion || '-'}
+                        {updateStatus?.availableVersion ? ` / ${t('settings.update.latestVersion', currentLanguage)} ${updateStatus.availableVersion}` : ''}
                     </Typography>
 
                     {isDownloading && (
@@ -260,7 +264,7 @@ export default function Settings({
                                 disabled={checkDisabled}
                                 sx={{ background: 'var(--button-bg-color)', color: 'var(--button-text-color)' }}
                             >
-                                업데이트 확인
+                                {t('settings.button.checkUpdates', currentLanguage)}
                             </Button>
                             <Button
                                 variant="outlined"
@@ -269,7 +273,7 @@ export default function Settings({
                                 disabled={downloadDisabled}
                                 sx={{ color: 'var(--text-color)', borderColor: 'var(--border-color)' }}
                             >
-                                다운로드
+                                {t('settings.button.download', currentLanguage)}
                             </Button>
                             <Button
                                 variant="outlined"
@@ -278,7 +282,7 @@ export default function Settings({
                                 disabled={installDisabled}
                                 sx={{ color: 'var(--text-color)', borderColor: 'var(--border-color)' }}
                             >
-                                재시작 후 설치
+                                {t('settings.button.installRestart', currentLanguage)}
                             </Button>
                         </Stack>
                         <Button
@@ -287,13 +291,27 @@ export default function Settings({
                             onClick={handleSave}
                             sx={{ background: 'var(--button-bg-color)', color: 'var(--button-text-color)' }}
                         >
-                            저장
+                            {t('settings.button.save', currentLanguage)}
                         </Button>
                     </Stack>
                 </Stack>
             </Box>
         </Box>
     );
+}
+
+function getGameDisplayName(game: SupportedGame | undefined, language: LanguageCode) {
+    if (!game) return t('settings.game.selectedFallback', language);
+    if (game.id === 'long-yin-li-zhi-zhuan') return t('settings.game.longYinLiZhiZhuan', language);
+
+    return game.displayName;
+}
+
+function getGameInstallHint(game: SupportedGame | undefined, language: LanguageCode) {
+    if (!game) return '';
+    if (game.id === 'long-yin-li-zhi-zhuan') return t('settings.game.installHint.longYinLiZhiZhuan', language);
+
+    return game.installFolderHint;
 }
 
 const selectSx = {

@@ -60,6 +60,7 @@ import type {
     ModFileType,
     ModPackage,
     OnlineModCatalogItem,
+    PackageDependency,
     ApplyPackageSettingsChanges,
     PackageSettings,
     ScriptField,
@@ -156,23 +157,100 @@ type PackSourceEntry = {
 
 type JsonArrayPathCandidate = {
     path: string;
-    itemType: 'string' | 'object';
+    itemType: 'string' | 'object' | 'objectMap';
     valueKeys: string[];
+    fields: string[];
+    filterValues: Record<string, string[]>;
+    examples: Array<{ key: string; data: Record<string, unknown> }>;
+};
+
+type LinkedConfigPreview = {
+    candidate: JsonArrayPathCandidate;
+    example: { key: string; data: Record<string, unknown> };
+    targetPath: string;
+    fields: string[];
+    filteredCount: number;
+    fileName: string;
 };
 
 type ScriptBuilderFeature = ScriptFeature & {
     sampleText?: string;
     cfgText?: string;
     collapsed?: boolean;
+    linkedConfigContentCollapsed?: boolean;
     linkedConfigText?: string;
     linkedConfigPreviewText?: string;
     linkedConfigArrayCandidates?: JsonArrayPathCandidate[];
+    linkedConfigData?: unknown;
 };
 
 // Parses the result from setPackageEnabled / setDllEnabled (may be legacy array or new ToggleResult)
 function parseToggleResult(result: unknown): ToggleResult {
     if (Array.isArray(result)) return { packages: result as ModPackage[], warnings: [] };
     return result as ToggleResult;
+}
+
+type PackageTreeRow = {
+    pkg: ModPackage;
+    depth: number;
+    hasDependents: boolean;
+};
+
+function getPackageDependencyKey(pkg: ModPackage): string[] {
+    return [pkg.source?.catalogId, pkg.id, pkg.name]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map((value) => value.trim().toLowerCase());
+}
+
+function getDependencyTarget(pkg: ModPackage): string {
+    return pkg.dependency?.target?.trim().toLowerCase() ?? '';
+}
+
+function getPackageDependencyTarget(pkg: ModPackage): string {
+    return pkg.source?.catalogId || pkg.id || pkg.name;
+}
+
+function getPackageDependencyLabel(pkg: ModPackage): string {
+    return pkg.source?.catalogId ? `${pkg.name} (${pkg.source.catalogId})` : pkg.name;
+}
+
+function buildPackageTreeRows(packages: ModPackage[], expandedDependencyIds: Set<string>): PackageTreeRow[] {
+    const sorted = [...packages].sort((a, b) => a.name.localeCompare(b.name));
+    const childrenByParentId = new Map<string, ModPackage[]>();
+    const childIds = new Set<string>();
+
+    for (const pkg of sorted) {
+        if (!pkg.dependency?.target) continue;
+        const parent = sorted.find((candidate) => candidate.id !== pkg.id && getPackageDependencyKey(candidate).includes(getDependencyTarget(pkg)));
+        if (!parent) continue;
+        childIds.add(pkg.id);
+        if (!childrenByParentId.has(parent.id)) childrenByParentId.set(parent.id, []);
+        childrenByParentId.get(parent.id)!.push(pkg);
+    }
+
+    const rows: PackageTreeRow[] = [];
+    const visited = new Set<string>();
+    const visit = (pkg: ModPackage, depth: number) => {
+        if (visited.has(pkg.id)) return;
+        visited.add(pkg.id);
+        const children = childrenByParentId.get(pkg.id) ?? [];
+        rows.push({
+            pkg,
+            depth,
+            hasDependents: children.length > 0,
+        });
+        if (!expandedDependencyIds.has(pkg.id)) return;
+        for (const child of children) visit(child, depth + 1);
+    };
+
+    for (const pkg of sorted) {
+        if (!childIds.has(pkg.id)) visit(pkg, 0);
+    }
+    for (const pkg of sorted) {
+        if (!visited.has(pkg.id)) visit(pkg, 0);
+    }
+
+    return rows;
 }
 
 // ── Settings Dialog ────────────────────────────────────────────────
@@ -183,13 +261,16 @@ function SettingsDialog({ packageId, onClose }: { packageId: string; onClose: ()
     const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
     const [jsonValues, setJsonValues] = useState<Record<string, string | number | boolean>>({});
     const [selectedFiles, setSelectedFiles] = useState<Record<string, string>>({});
-    const [pendingImports, setPendingImports] = useState<Array<{ featureId: string; sourcePath: string }>>([]);
+    const [pendingImports, setPendingImports] = useState<Array<{ featureId: string; sourcePath: string; metadata?: Record<string, unknown> }>>([]);
+    const [pendingImportValues, setPendingImportValues] = useState<Record<string, Record<string, unknown>>>({});
     const [pendingDeletes, setPendingDeletes] = useState<Array<{ featureId: string; fileName: string }>>([]);
     const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
     const [selectedConfigPath, setSelectedConfigPath] = useState<string | null>(null);
     const [configContent, setConfigContent] = useState('');
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [helpOpen, setHelpOpen] = useState(false);
+    const [guideText] = useState('');
 
     useEffect(() => {
         window.electronAPI.getPackageSettings(packageId).then((data: PackageSettings) => {
@@ -224,7 +305,10 @@ function SettingsDialog({ packageId, onClose }: { packageId: string; onClose: ()
                 const changes: ApplyPackageSettingsChanges = {
                     cfgValues: fieldValues,
                     jsonValues,
-                    fileImports: pendingImports,
+                    fileImports: pendingImports.map((item) => ({
+                        ...item,
+                        metadata: pendingImportValues[`${item.featureId}:${item.sourcePath}`] ?? item.metadata,
+                    })),
                     fileDeletes: pendingDeletes,
                     configText: selectedConfigPath ? { path: selectedConfigPath, content: configContent } : null,
                 };
@@ -233,6 +317,7 @@ function SettingsDialog({ packageId, onClose }: { packageId: string; onClose: ()
                 setFieldValues(updated.cfgValues ?? {});
                 setJsonValues(updated.jsonValues ?? {});
                 setPendingImports([]);
+                setPendingImportValues({});
                 setPendingDeletes([]);
                 showNotification('설정이 저장되었습니다.');
                 onClose();
@@ -458,6 +543,40 @@ function SettingsDialog({ packageId, onClose }: { packageId: string; onClose: ()
         );
     };
 
+    const getFileManagerFields = (feature: ScriptFeature) =>
+        feature.linkedConfigSelectedFields && feature.linkedConfigSelectedFields.length > 0
+            ? feature.linkedConfigSelectedFields
+            : Object.keys(feature.linkedConfigFieldDefaults ?? {});
+
+    const renderMetadataInput = (feature: ScriptFeature, sourcePath: string, field: string) => {
+        const valueId = `${feature.id}:${sourcePath}`;
+        const values = pendingImportValues[valueId] ?? {};
+        const fallback = feature.linkedConfigFieldDefaults?.[field] ?? '';
+        const value = values[field] ?? fallback;
+        return (
+            <TextField
+                key={field}
+                size="small"
+                label={field}
+                type={typeof fallback === 'number' ? 'number' : 'text'}
+                value={Array.isArray(value) ? value.join(', ') : String(value ?? '')}
+                onChange={(e) => {
+                    const nextValue =
+                        Array.isArray(fallback)
+                            ? e.target.value.split(',').map((item) => item.trim()).filter(Boolean)
+                            : typeof fallback === 'number'
+                              ? Number(e.target.value)
+                              : e.target.value;
+                    setPendingImportValues((prev) => ({
+                        ...prev,
+                        [valueId]: { ...(prev[valueId] ?? {}), [field]: nextValue },
+                    }));
+                }}
+                sx={{ ...inputSx, minWidth: 150, flex: '1 1 160px' }}
+            />
+        );
+    };
+
     const renderFeature = (feature: ScriptFeature) => {
         const managedGroup = settings?.managedFiles.find((group) => group.featureId === feature.id);
         return (
@@ -490,13 +609,36 @@ function SettingsDialog({ packageId, onClose }: { packageId: string; onClose: ()
                             startIcon={<UploadFileIcon />}
                             onClick={async () => {
                                 const filePath = await window.electronAPI.selectManagedFile((feature.extensions ?? []).map((ext) => `.${ext.replace(/^\./, '')}`).join(','));
-                                if (filePath) setPendingImports((prev) => [...prev, { featureId: feature.id, sourcePath: filePath }]);
+                                if (filePath) {
+                                    setPendingImports((prev) => [...prev, { featureId: feature.id, sourcePath: filePath }]);
+                                    const valueId = `${feature.id}:${filePath}`;
+                                    setPendingImportValues((prev) => ({
+                                        ...prev,
+                                        [valueId]: Object.fromEntries(
+                                            getFileManagerFields(feature).map((field) => [field, feature.linkedConfigFieldDefaults?.[field] ?? ''])
+                                        ),
+                                    }));
+                                }
                             }}
                             sx={{ alignSelf: 'flex-start', borderColor: 'var(--border-color)', color: 'var(--text-color)' }}
                         >
                             import
                         </Button>
-                        {[...(managedGroup?.files ?? []), ...pendingImports.filter((item) => item.featureId === feature.id).map((item) => item.sourcePath.split(/[\\/]/).pop() ?? item.sourcePath)].map((fileName) => {
+                        {pendingImports.filter((item) => item.featureId === feature.id).map((item) => {
+                            const fileName = item.sourcePath.split(/[\\/]/).pop() ?? item.sourcePath;
+                            const fields = getFileManagerFields(feature);
+                            return (
+                                <Box key={item.sourcePath} sx={{ p: 1, border: '1px solid var(--border-color)', borderRadius: 1 }}>
+                                    <Typography sx={{ color: 'var(--text-color)', fontSize: 13, mb: 1 }}>{fileName}</Typography>
+                                    {fields.length > 0 && (
+                                        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
+                                            {fields.map((field) => renderMetadataInput(feature, item.sourcePath, field))}
+                                        </Stack>
+                                    )}
+                                </Box>
+                            );
+                        })}
+                        {(managedGroup?.files ?? []).map((fileName) => {
                             const deleting = pendingDeletes.some((item) => item.featureId === feature.id && item.fileName === fileName);
                             return (
                                 <Stack key={fileName} direction="row" spacing={1} sx={{ alignItems: 'center', opacity: deleting ? 0.45 : 1 }}>
@@ -505,7 +647,14 @@ function SettingsDialog({ packageId, onClose }: { packageId: string; onClose: ()
                                         <Button
                                             size="small"
                                             color="error"
-                                            onClick={() => setPendingDeletes((prev) => [...prev, { featureId: feature.id, fileName }])}
+                                            disabled={deleting || saving}
+                                            onClick={() =>
+                                                setPendingDeletes((prev) =>
+                                                    prev.some((item) => item.featureId === feature.id && item.fileName === fileName)
+                                                        ? prev
+                                                        : [...prev, { featureId: feature.id, fileName }]
+                                                )
+                                            }
                                         >
                                             delete
                                         </Button>
@@ -692,6 +841,7 @@ function SettingsDialog({ packageId, onClose }: { packageId: string; onClose: ()
 
 function DetailDialog({ pkg, onClose }: { pkg: ModPackage; onClose: () => void }) {
     return (
+        <>
         <Dialog
             open
             onClose={onClose}
@@ -724,6 +874,14 @@ function DetailDialog({ pkg, onClose }: { pkg: ModPackage; onClose: () => void }
                                 설명
                             </Typography>
                             <Typography sx={{ color: 'var(--text-color)' }}>{pkg.description}</Typography>
+                        </Box>
+                    )}
+                    {pkg.version && (
+                        <Box>
+                            <Typography variant="caption" sx={{ color: 'var(--text-color-light)' }}>
+                                버전
+                            </Typography>
+                            <Typography sx={{ color: 'var(--text-color)' }}>v{pkg.version}</Typography>
                         </Box>
                     )}
                     <Box>
@@ -777,6 +935,7 @@ function DetailDialog({ pkg, onClose }: { pkg: ModPackage; onClose: () => void }
                 </Button>
             </DialogActions>
         </Dialog>
+        </>
     );
 }
 
@@ -1000,13 +1159,22 @@ function parseCfgFields(cfgPath: string, cfgText: string): ScriptField[] {
     return fields;
 }
 
-function inferJsonFields(sampleText: string): ScriptField[] {
-    let data: unknown;
+function stripJsonBom(text: string): string {
+    return text.replace(/^[\uFEFF\u200B\u200C\u200D\u2060]+/, '');
+}
+
+function parseJsonText<T>(text: string | undefined, fallback: T): T {
+    const source = stripJsonBom(text ?? '');
+    if (!source.trim()) return fallback;
     try {
-        data = JSON.parse(sampleText || '{}');
+        return JSON.parse(source) as T;
     } catch {
-        return [];
+        return fallback;
     }
+}
+
+function inferJsonFields(sampleText: string): ScriptField[] {
+    const data = parseJsonText<unknown>(sampleText, {});
     const fields: ScriptField[] = [];
     const walk = (value: unknown, pathParts: string[]) => {
         if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -1036,27 +1204,63 @@ function inferJsonFields(sampleText: string): ScriptField[] {
 }
 
 function inferLinkedConfigArrayCandidates(sampleText: string): JsonArrayPathCandidate[] {
-    let data: unknown;
-    try {
-        data = JSON.parse(sampleText || 'null');
-    } catch {
-        return [];
-    }
+    const data = parseJsonText<unknown>(sampleText, null);
+    if (!data) return [];
     const candidates: JsonArrayPathCandidate[] = [];
     const likelyValueKeys = ['file', 'fileName', 'filename', 'path', 'name', 'id'];
+    const readObjectFields = (items: Record<string, unknown>[]) =>
+        [...new Set(items.flatMap((item) => Object.keys(item)))];
+    const readFilterValues = (items: Record<string, unknown>[]) => {
+        const values: Record<string, string[]> = {};
+        for (const item of items) {
+            for (const [key, value] of Object.entries(item)) {
+                if (!['string', 'number', 'boolean'].includes(typeof value)) continue;
+                const text = String(value);
+                values[key] = values[key] ?? [];
+                if (!values[key].includes(text)) values[key].push(text);
+            }
+        }
+        return values;
+    };
     const walk = (value: unknown, pathParts: string[]) => {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            const record = value as Record<string, unknown>;
+            const objectMapItems = Object.entries(record).filter(
+                ([, child]) => child && typeof child === 'object' && !Array.isArray(child)
+            ) as Array<[string, Record<string, unknown>]>;
+            if (objectMapItems.length > 0 && objectMapItems.length === Object.keys(record).length) {
+                const pathName = pathParts.length > 0 ? pathParts.join('/') : '$';
+                const items = objectMapItems.map(([, child]) => child);
+                candidates.push({
+                    path: pathName,
+                    itemType: 'objectMap',
+                    valueKeys: ['path', ...likelyValueKeys],
+                    fields: readObjectFields(items),
+                    filterValues: readFilterValues(items),
+                    examples: objectMapItems.map(([key, child]) => ({ key, data: child })),
+                });
+            }
+        }
         if (Array.isArray(value)) {
-            const pathName = pathParts.length > 0 ? pathParts.join('.') : '$';
+            const pathName = pathParts.length > 0 ? pathParts.join('/') : '$';
             if (value.every((item) => typeof item === 'string')) {
-                candidates.push({ path: pathName, itemType: 'string', valueKeys: [] });
+                candidates.push({ path: pathName, itemType: 'string', valueKeys: [], fields: [], filterValues: {}, examples: [] });
             } else if (value.every((item) => item && typeof item === 'object' && !Array.isArray(item))) {
+                const items = value as Array<Record<string, unknown>>;
                 const valueKeys = likelyValueKeys.filter((key) =>
                     value.some((item) => {
                         const child = (item as Record<string, unknown>)[key];
                         return ['string', 'number', 'boolean'].includes(typeof child);
                     })
                 );
-                candidates.push({ path: pathName, itemType: 'object', valueKeys });
+                candidates.push({
+                    path: pathName,
+                    itemType: 'object',
+                    valueKeys,
+                    fields: readObjectFields(items),
+                    filterValues: readFilterValues(items),
+                    examples: items.map((item, idx) => ({ key: String(idx), data: item })),
+                });
             }
             return;
         }
@@ -1070,13 +1274,218 @@ function inferLinkedConfigArrayCandidates(sampleText: string): JsonArrayPathCand
     return candidates;
 }
 
+function getDefaultLinkedConfigPatch(
+    candidates: JsonArrayPathCandidate[],
+    extensions: string[] = []
+): Partial<ScriptBuilderFeature> {
+    const normalizedExtensions = extensions.map((ext) => ext.replace(/^\./, '').toLowerCase()).filter(Boolean);
+    const candidate =
+        candidates.find((item) =>
+            item.path === 'files' ||
+            normalizedExtensions.some((ext) => item.filterValues.type?.some((value) => value.toLowerCase() === ext))
+        ) ?? candidates[0];
+    if (!candidate) {
+        return {
+            linkedConfigArrayPath: '',
+            linkedConfigTargetPath: '',
+            linkedConfigFilterKey: '',
+            linkedConfigFilterValue: '',
+            linkedConfigValueKey: '',
+            linkedConfigSelectedFields: [],
+            linkedConfigFieldDefaults: {},
+        };
+    }
+    const firstExample = candidate.examples[0]?.data ?? {};
+    return {
+        linkedConfigArrayPath: candidate.path,
+        linkedConfigTargetPath: candidate.path,
+        linkedConfigPathSegments: getPathSegments(candidate.path),
+        linkedConfigKeyTemplate: inferKeyTemplateFromExample(candidate.examples[0]?.key),
+        linkedConfigFilterKey: '',
+        linkedConfigFilterValue: '',
+        linkedConfigValueKey: candidate.valueKeys[0] ?? '',
+        linkedConfigSelectedFields: candidate.fields,
+        linkedConfigFieldDefaults: Object.fromEntries(candidate.fields.map((field) => [field, firstExample[field] ?? ''])),
+    };
+}
+
+function getFileNameFromPath(value: string): string {
+    return normalizePackPath(value).split('/').pop() ?? value;
+}
+
+function replaceLastPathPart(value: string, fileName: string): string {
+    const normalized = normalizePackPath(value);
+    const parts = normalized.split('/');
+    parts[parts.length - 1] = fileName;
+    return parts.join('/');
+}
+
+function normalizeLinkedConfigPath(value = ''): string {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === '$' || trimmed.toLowerCase() === 'root') return '$';
+    return trimmed
+        .replace(/\\/g, '/')
+        .replace(/\./g, '/')
+        .replace(/\/+/g, '/')
+        .replace(/^\/+|\/+$/g, '');
+}
+
+function getLinkedConfigPathParts(value: string): string[] {
+    const normalized = normalizeLinkedConfigPath(value);
+    return normalized === '$' ? [] : normalized.split('/').filter(Boolean);
+}
+
+function getLinkedConfigPathLabel(value: string): string {
+    const normalized = normalizeLinkedConfigPath(value);
+    return normalized === '$' ? 'root' : normalized;
+}
+
+function getEditableLinkedConfigPath(value: string | undefined): string {
+    return !value || value === '$' ? '' : getLinkedConfigPathLabel(value);
+}
+
+function findLinkedConfigCandidate(
+    candidates: JsonArrayPathCandidate[] | undefined,
+    pathValue: string | undefined
+): JsonArrayPathCandidate | undefined {
+    const normalized = normalizeLinkedConfigPath(pathValue || '$');
+    return candidates?.find((item) => normalizeLinkedConfigPath(item.path) === normalized);
+}
+
+function getObjectAtPath(data: unknown, pathValue: string): Record<string, unknown> | null {
+    const parts = getLinkedConfigPathParts(pathValue);
+    if (parts.length === 0) {
+        return data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : null;
+    }
+    const value = parts.reduce<unknown>((acc, part) => {
+        if (acc && typeof acc === 'object' && !Array.isArray(acc)) return (acc as Record<string, unknown>)[part];
+        return undefined;
+    }, data);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function getObjectPathOptions(data: unknown, parentPath: string): Array<{ label: string; value: string }> {
+    const target = getObjectAtPath(data, parentPath);
+    if (!target) return [];
+    return Object.entries(target)
+        .filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value))
+        .map(([key]) => ({
+            label: parentPath === '$' || parentPath === 'root' || parentPath === '' ? key : `${getLinkedConfigPathLabel(parentPath)}/${key}`,
+            value: parentPath === '$' || parentPath === 'root' || parentPath === '' ? key : `${getLinkedConfigPathLabel(parentPath)}/${key}`,
+        }));
+}
+
+function buildLinkedConfigCandidateFromObject(data: unknown, pathValue: string): JsonArrayPathCandidate | undefined {
+    const target = getObjectAtPath(data, pathValue);
+    if (!target) return undefined;
+    const objectMapItems = Object.entries(target).filter(
+        ([, child]) => child && typeof child === 'object' && !Array.isArray(child)
+    ) as Array<[string, Record<string, unknown>]>;
+    if (objectMapItems.length === 0) return undefined;
+    const preferredFields = ['author', 'displayName', 'displayname', 'gender', 'lv', 'tags', 'description', 'bonus', 'amount'];
+    const fields = [...new Set(objectMapItems.flatMap(([, child]) => Object.keys(child)))];
+    const orderedFields = [
+        ...preferredFields.filter((field) => fields.includes(field)),
+        ...fields.filter((field) => !preferredFields.includes(field)),
+    ];
+    const filterValues: Record<string, string[]> = {};
+    for (const [, child] of objectMapItems) {
+        for (const [key, value] of Object.entries(child)) {
+            if (!['string', 'number', 'boolean'].includes(typeof value)) continue;
+            const text = String(value);
+            filterValues[key] = filterValues[key] ?? [];
+            if (!filterValues[key].includes(text)) filterValues[key].push(text);
+        }
+    }
+    return {
+        path: normalizeLinkedConfigPath(pathValue),
+        itemType: 'objectMap',
+        valueKeys: ['path', 'file', 'fileName', 'filename', 'name', 'id'],
+        fields: orderedFields,
+        filterValues,
+        examples: objectMapItems.map(([key, child]) => ({ key, data: child })),
+    };
+}
+
+function getPathSegments(pathValue: string): string[] {
+    return getLinkedConfigPathParts(pathValue);
+}
+
+function inferKeyTemplateFromExample(exampleKey = ''): string {
+    return exampleKey ? replaceLastPathPart(exampleKey, '$') : '$';
+}
+
+function applyKeyTemplate(template: string | undefined, fileName: string): string {
+    const normalized = normalizePackPath(template || '$');
+    return normalized.includes('$') ? normalized.replaceAll('$', fileName) : normalizePackPath(pathJoinPosix(normalized, fileName));
+}
+
+function pathJoinPosix(...parts: string[]): string {
+    return parts.map((part) => normalizePackPath(part).replace(/^\/+|\/+$/g, '')).filter(Boolean).join('/');
+}
+
+function getLinkedConfigBasePath(linkedConfigPath = ''): string {
+    const parts = normalizePackPath(linkedConfigPath).split('/').filter(Boolean);
+    return parts[0]?.toLowerCase() === 'plugins' && parts.length >= 2 ? parts.slice(0, 2).join('/') : '';
+}
+
+function inferTargetDirFromLinkedConfig(
+    linkedConfigPath: string | undefined,
+    candidate: JsonArrayPathCandidate | undefined,
+    extensions: string[] = [],
+    filterKey = '',
+    filterValue = ''
+): string {
+    if (!candidate) return '';
+    const normalizedExtensions = extensions.map((ext) => ext.replace(/^\./, '').toLowerCase()).filter(Boolean);
+    const example =
+        candidate.examples.find((item) => filterKey && filterValue && String(item.data[filterKey] ?? '') === filterValue) ??
+        candidate.examples.find((item) => normalizedExtensions.some((ext) => String(item.data.type ?? '').toLowerCase() === ext)) ??
+        candidate.examples[0];
+    if (!example?.key.includes('/')) return '';
+    const base = getLinkedConfigBasePath(linkedConfigPath);
+    const entryDir = example.key.split('/').slice(0, -1).join('/');
+    return normalizePackPath(base ? `${base}/${entryDir}` : entryDir);
+}
+
+function getAutoPreviewFileName(feature: ScriptBuilderFeature, assetOptions: Array<{ value: string; extension: string }>): string {
+    const allowedExtensions = (feature.extensions ?? []).map((ext) => ext.replace(/^\./, '').toLowerCase()).filter(Boolean);
+    const matchingAsset = assetOptions.find((option) => allowedExtensions.length === 0 || allowedExtensions.includes(option.extension));
+    if (matchingAsset) return getFileNameFromPath(matchingAsset.value);
+    if (feature.linkedConfigAssetPath) return getFileNameFromPath(feature.linkedConfigAssetPath);
+    return `test.${allowedExtensions[0] || 'png'}`;
+}
+
+function getLinkedConfigPreview(feature: ScriptBuilderFeature, assetOptions: Array<{ value: string; extension: string }> = []): LinkedConfigPreview | null {
+    const candidate = findLinkedConfigCandidate(
+        feature.linkedConfigArrayCandidates,
+        feature.linkedConfigTargetPath || feature.linkedConfigArrayPath
+    ) ?? buildLinkedConfigCandidateFromObject(feature.linkedConfigData, feature.linkedConfigTargetPath || feature.linkedConfigArrayPath || '$');
+    if (!candidate) return null;
+    const filtered = candidate.examples.filter((example) => {
+        if (!feature.linkedConfigFilterKey || !feature.linkedConfigFilterValue) return true;
+        return String(example.data[feature.linkedConfigFilterKey] ?? '') === feature.linkedConfigFilterValue;
+    });
+    const example = filtered[0] ?? candidate.examples[0];
+    if (!example) return null;
+    const fileName = getAutoPreviewFileName(feature, assetOptions);
+    return {
+        candidate,
+        example,
+        targetPath: applyKeyTemplate(feature.linkedConfigKeyTemplate || inferKeyTemplateFromExample(example.key), fileName),
+        fields: candidate.fields.filter((field) => field !== feature.linkedConfigFilterKey),
+        filteredCount: filtered.length,
+        fileName,
+    };
+}
+
 function buildSettingsScript(features: ScriptBuilderFeature[]) {
     return {
         type: 'configurator' as const,
         version: 1,
-        features: features.map(({ sampleText, cfgText, collapsed, linkedConfigText, linkedConfigPreviewText, linkedConfigArrayCandidates, ...feature }) => ({
+        features: features.map(({ sampleText, cfgText, collapsed, linkedConfigContentCollapsed, linkedConfigText, linkedConfigPreviewText, linkedConfigArrayCandidates, linkedConfigData, ...feature }) => ({
             ...feature,
-            sample: feature.type === 'json_manager' ? JSON.parse(sampleText || '{}') : undefined,
+            sample: feature.type === 'json_manager' ? parseJsonText(sampleText, {}) : undefined,
         })),
     };
 }
@@ -1087,6 +1496,13 @@ function getFeatureScriptJson(feature: ScriptBuilderFeature): string {
     } catch {
         return '';
     }
+}
+
+function releaseNativeDialogFocus() {
+    window.setTimeout(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        window.focus();
+    }, 0);
 }
 
 function normalizePackPath(value: string): string {
@@ -1135,15 +1551,21 @@ function PackModDialog({
     open,
     onClose,
     onPacked,
+    packages = [],
 }: {
     open: boolean;
     onClose: () => void;
     onPacked: (pkgs: ModPackage[], name: string) => void;
+    packages?: ModPackage[];
 }) {
     const [packageType, setPackageType] = useState<'single' | 'collection'>('single');
     const [name, setName] = useState('');
     const [author, setAuthor] = useState('');
     const [description, setDescription] = useState('');
+    const [version, setVersion] = useState('1.0.0');
+    const [dependencyEnabled, setDependencyEnabled] = useState(false);
+    const [dependencyTarget, setDependencyTarget] = useState('');
+    const [dependencyDisplayName, setDependencyDisplayName] = useState('');
     const [packStep, setPackStep] = useState<1 | 2 | 3>(1);
     const [helpOpen, setHelpOpen] = useState(false);
     const [guideText, setGuideText] = useState('');
@@ -1178,6 +1600,10 @@ function PackModDialog({
         setName('');
         setAuthor('');
         setDescription('');
+        setVersion('1.0.0');
+        setDependencyEnabled(false);
+        setDependencyTarget('');
+        setDependencyDisplayName('');
         setPackStep(1);
         setHelpOpen(false);
         setSources([]);
@@ -1244,6 +1670,7 @@ function PackModDialog({
     const handleAddFile = async () => {
         setError('');
         const selected = await window.electronAPI.selectModImportFile();
+        releaseNativeDialogFocus();
         if (!selected) return;
         const fileName = selected.split(/[\\/]/).pop() ?? '';
         const baseName = fileName.replace(/\.(dll|zip)$/i, '');
@@ -1315,6 +1742,7 @@ function PackModDialog({
                 if (!name) setName(result.modInfo?.name || baseName);
                 if (!author && result.modInfo?.author) setAuthor(result.modInfo.author);
                 if (!description && result.modInfo?.description) setDescription(result.modInfo.description);
+                if (result.modInfo?.version) setVersion(result.modInfo.version);
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'ZIP inspect failed');
             } finally {
@@ -1428,6 +1856,15 @@ function PackModDialog({
                 sourceEntryName: entry.sourceEntryName ?? entry.entryName,
             }))
     );
+    const assetEntryOptions = sources.flatMap((source) =>
+        source.entries
+            .filter((entry) => !entry.isDirectory && entry.selectedType === 'asset')
+            .map((entry) => ({
+                value: entry.entryName,
+                label: `${source.sourceName} / ${entry.entryName}`,
+                extension: getFileNameFromPath(entry.entryName).split('.').pop()?.toLowerCase() ?? '',
+            }))
+    );
 
     const handleSelectLinkedConfig = async (featureId: string, value: string) => {
         const option = jsonEntryOptions.find((item) => item.value === value);
@@ -1435,15 +1872,30 @@ function PackModDialog({
         try {
             const text = await window.electronAPI.readZipEntryText(option.sourcePath, option.sourceEntryName);
             const candidates = inferLinkedConfigArrayCandidates(text);
-            const firstCandidate = candidates[0];
+            const linkedConfigData = parseJsonText<unknown>(text, null);
+            const defaultPatch = getDefaultLinkedConfigPatch(candidates, scriptFeatures.find((feature) => feature.id === featureId)?.extensions);
+            const currentFeature = scriptFeatures.find((feature) => feature.id === featureId);
+            const defaultCandidate = findLinkedConfigCandidate(candidates, defaultPatch.linkedConfigTargetPath);
+            const inferredTargetDir = inferTargetDirFromLinkedConfig(
+                option.entryName,
+                defaultCandidate,
+                currentFeature?.extensions
+            );
             updateScriptFeature(featureId, {
                 linkedConfigPath: option.entryName,
-                linkedConfigArrayPath: firstCandidate?.path ?? '',
-                linkedConfigValueKey: firstCandidate?.valueKeys[0] ?? '',
                 linkedConfigText: text,
                 linkedConfigPreviewText: text,
+                linkedConfigContentCollapsed: true,
                 linkedConfigArrayCandidates: candidates,
+                linkedConfigData,
+                ...(currentFeature?.targetDir && currentFeature.targetDir !== 'plugins'
+                    ? {}
+                    : inferredTargetDir
+                      ? { targetDir: inferredTargetDir }
+                      : {}),
+                ...defaultPatch,
             });
+            releaseNativeDialogFocus();
         } catch (err) {
             setError(err instanceof Error ? err.message : '연동 설정 JSON을 읽지 못했습니다.');
         }
@@ -1451,8 +1903,10 @@ function PackModDialog({
 
     const handleLinkedConfigTextChange = (feature: ScriptBuilderFeature, text: string) => {
         const candidates = inferLinkedConfigArrayCandidates(text);
+        const linkedConfigData = parseJsonText<unknown>(text, null);
         const selectedCandidate =
-            candidates.find((candidate) => candidate.path === feature.linkedConfigArrayPath) ?? candidates[0];
+            findLinkedConfigCandidate(candidates, feature.linkedConfigTargetPath || feature.linkedConfigArrayPath) ?? candidates[0];
+        const defaultPatch = getDefaultLinkedConfigPatch(candidates, feature.extensions);
         const nextValueKey =
             selectedCandidate?.valueKeys.includes(feature.linkedConfigValueKey || '')
                 ? feature.linkedConfigValueKey
@@ -1461,8 +1915,15 @@ function PackModDialog({
             linkedConfigText: text,
             linkedConfigPreviewText: text,
             linkedConfigArrayCandidates: candidates,
-            linkedConfigArrayPath: feature.linkedConfigArrayPath || selectedCandidate?.path || '',
+            linkedConfigData,
+            linkedConfigArrayPath: feature.linkedConfigArrayPath || defaultPatch.linkedConfigArrayPath || '',
+            linkedConfigTargetPath: feature.linkedConfigTargetPath || defaultPatch.linkedConfigTargetPath || '',
+            linkedConfigFilterKey: feature.linkedConfigFilterKey || defaultPatch.linkedConfigFilterKey || '',
+            linkedConfigFilterValue: feature.linkedConfigFilterValue || defaultPatch.linkedConfigFilterValue || '',
             linkedConfigValueKey: nextValueKey,
+            linkedConfigSelectedFields: feature.linkedConfigSelectedFields?.length
+                ? feature.linkedConfigSelectedFields
+                : defaultPatch.linkedConfigSelectedFields,
         });
     };
 
@@ -1478,11 +1939,13 @@ function PackModDialog({
     const handleSelectSavePath = async () => {
         const selected = await window.electronAPI.selectSavePath(name || 'mod');
         if (selected) setSavePath(selected);
+        releaseNativeDialogFocus();
     };
 
     const handlePack = async () => {
         if (!canLeaveBasicInfo) { setError('패키지 이름, 제작자, 설명을 모두 입력해주세요.'); return; }
         if (sources.length === 0) { setError('Add at least one DLL or ZIP file.'); return; }
+        if (dependencyEnabled && !dependencyTarget.trim()) { setError('종속 모드의 메인 모드를 선택하거나 식별자를 입력해 주세요.'); return; }
         if (!savePath) { setError('저장 경로를 선택해주세요.'); return; }
         const duplicates = findDuplicateEntryPaths(sources);
         if (duplicates.length > 0) { setError(`중복 경로가 있습니다: ${duplicates.join(', ')}`); return; }
@@ -1491,15 +1954,20 @@ function PackModDialog({
         try {
             const settingsScript =
                 scriptJsonText.trim()
-                    ? JSON.parse(scriptJsonText)
+                    ? JSON.parse(stripJsonBom(scriptJsonText))
                     : scriptFeatures.length > 0
                       ? buildSettingsScript(scriptFeatures)
                       : null;
+            const dependency: PackageDependency | undefined = dependencyEnabled
+                ? { target: dependencyTarget.trim(), displayName: dependencyDisplayName.trim() || undefined }
+                : undefined;
             const result = await window.electronAPI.packMod({
                 name: name || sources[0]?.packageName || '알 수 없음',
                 author,
                 description,
                 packageType,
+                version: version.trim() || undefined,
+                dependency,
                 files: [],
                 settingsScript,
                 sources: sources.map((source) => ({
@@ -1610,11 +2078,14 @@ function PackModDialog({
     };
 
     return (
+        <>
         <Dialog
             open={open}
             onClose={handleClose}
             maxWidth={false}
             fullWidth
+            disableEnforceFocus
+            disableRestoreFocus
             slotProps={{
                 paper: {
                     sx: {
@@ -1796,6 +2267,7 @@ function PackModDialog({
                     </Box>
                     <TextField label="패키지 이름" value={name} onChange={(e) => setName(e.target.value)} sx={inputSx} />
                     <TextField label="제작자" value={author} onChange={(e) => setAuthor(e.target.value)} sx={inputSx} />
+                    <TextField label="버전" value={version} onChange={(e) => setVersion(e.target.value)} sx={inputSx} />
                     <TextField
                         label="설명"
                         value={description}
@@ -1804,6 +2276,48 @@ function PackModDialog({
                         minRows={2}
                         sx={multilineSx}
                     />
+                    <Box sx={{ p: 1.25, border: '1px solid var(--border-color)', borderRadius: 1 }}>
+                        <FormControlLabel
+                            control={<Switch size="small" checked={dependencyEnabled} onChange={(e) => setDependencyEnabled(e.target.checked)} />}
+                            label={<Typography sx={{ color: 'var(--text-color)' }}>종속 모드로 패킹</Typography>}
+                        />
+                        {dependencyEnabled && (
+                            <Stack spacing={1} sx={{ mt: 1 }}>
+                                <Select
+                                    size="small"
+                                    displayEmpty
+                                    value=""
+                                    onChange={(e) => {
+                                        const selected = packages.find((pkg) => pkg.id === e.target.value);
+                                        if (!selected) return;
+                                        setDependencyTarget(getPackageDependencyTarget(selected));
+                                        setDependencyDisplayName(selected.name);
+                                    }}
+                                    sx={selectSx}
+                                >
+                                    <MenuItem value="">설치된 메인 모드 선택</MenuItem>
+                                    {packages.map((pkg) => (
+                                        <MenuItem key={pkg.id} value={pkg.id}>
+                                            {getPackageDependencyLabel(pkg)}
+                                        </MenuItem>
+                                    ))}
+                                </Select>
+                                <TextField
+                                    label="메인 모드 식별자"
+                                    value={dependencyTarget}
+                                    onChange={(e) => setDependencyTarget(e.target.value)}
+                                    helperText="GitHub catalog id, package id, package name 중 하나와 매칭됩니다."
+                                    sx={inputSx}
+                                />
+                                <TextField
+                                    label="표시 이름"
+                                    value={dependencyDisplayName}
+                                    onChange={(e) => setDependencyDisplayName(e.target.value)}
+                                    sx={inputSx}
+                                />
+                            </Stack>
+                        )}
+                    </Box>
                     </>
                     )}
 
@@ -1889,26 +2403,285 @@ function PackModDialog({
                                                             연동설정파일추가
                                                         </Button>
                                                     </Stack>
-                                                    <TextField
-                                                        size="small"
-                                                        label="연동 배열 JSON path"
-                                                        value={feature.linkedConfigArrayPath || ''}
-                                                        onChange={(e) => updateScriptFeature(feature.id, { linkedConfigArrayPath: e.target.value })}
-                                                        sx={inputSx}
-                                                        placeholder="예: files"
-                                                    />
+                                                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                                                        <TextField
+                                                            size="small"
+                                                            label="연동 배열 JSON path"
+                                                            value={getEditableLinkedConfigPath(feature.linkedConfigArrayPath)}
+                                                            onChange={(e) => {
+                                                                const pathValue = e.target.value.trim() === '' ? '' : normalizeLinkedConfigPath(e.target.value);
+                                                                updateScriptFeature(feature.id, {
+                                                                    linkedConfigArrayPath: pathValue,
+                                                                    linkedConfigTargetPath: pathValue,
+                                                                    linkedConfigPathSegments: getPathSegments(pathValue),
+                                                                });
+                                                            }}
+                                                            sx={{ ...inputSx, flex: 1 }}
+                                                        />
+                                                        <Tooltip title="/ 구분자를 사용합니다. 예: root, files, files/pngs">
+                                                            <IconButton size="small" sx={{ color: 'var(--text-color-light)' }}>
+                                                                <InfoOutlinedIcon fontSize="small" />
+                                                            </IconButton>
+                                                        </Tooltip>
+                                                    </Stack>
                                                     {feature.linkedConfigPath && (
                                                         <Stack spacing={1}>
-                                                            <TextField
-                                                                multiline
-                                                                minRows={5}
+                                                            <Button
+                                                                size="small"
+                                                                variant="outlined"
+                                                                startIcon={feature.linkedConfigContentCollapsed ? <ChevronRightIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                                                                onClick={() => updateScriptFeature(feature.id, { linkedConfigContentCollapsed: !feature.linkedConfigContentCollapsed })}
+                                                                sx={{ alignSelf: 'flex-start', borderColor: 'var(--border-color)', color: 'var(--text-color)' }}
+                                                            >
+                                                                연동 JSON 내용
+                                                            </Button>
+                                                            {feature.linkedConfigContentCollapsed && (
+                                                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12 }}>
+                                                                    {feature.linkedConfigData
+                                                                        ? `JSON 분석됨 / 후보 ${(feature.linkedConfigArrayCandidates ?? []).length}개`
+                                                                        : 'JSON 내용 없음 또는 파싱 실패'}
+                                                                </Typography>
+                                                            )}
+                                                            {!feature.linkedConfigContentCollapsed && (
+                                                                <TextField
+                                                                    multiline
+                                                                    minRows={5}
                                                                 label="연동 JSON 내용"
                                                                 value={feature.linkedConfigText ?? feature.linkedConfigPreviewText ?? ''}
                                                                 onChange={(e) => handleLinkedConfigTextChange(feature, e.target.value)}
                                                                 sx={multilineSx}
                                                                 placeholder="처음 패킹하는 빈 JSON이면 여기에 예시 JSON을 붙여넣어 배열 path를 추론할 수 있습니다."
-                                                            />
-                                                            {(feature.linkedConfigArrayCandidates ?? []).length > 0 ? (
+                                                                />
+                                                            )}
+                                                            {(() => {
+                                                                const preview = getLinkedConfigPreview(feature, assetEntryOptions);
+                                                                const pathOptions = [
+                                                                    { label: 'root', value: '$' },
+                                                                    ...getObjectPathOptions(feature.linkedConfigData, '$'),
+                                                                ];
+                                                                const childPathOptions = getObjectPathOptions(
+                                                                    feature.linkedConfigData,
+                                                                    feature.linkedConfigTargetPath || feature.linkedConfigArrayPath || '$'
+                                                                );
+                                                                return (
+                                                                    <Stack spacing={1}>
+                                                                        {(feature.linkedConfigArrayCandidates ?? []).length > 0 && (
+                                                                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
+                                                                                <Select
+                                                                                    size="small"
+                                                                                    value={normalizeLinkedConfigPath(feature.linkedConfigTargetPath || feature.linkedConfigArrayPath || '$')}
+                                                                                    onChange={(e) => {
+                                                                                        const pathValue = normalizeLinkedConfigPath(String(e.target.value));
+                                                                                        const candidate = findLinkedConfigCandidate(feature.linkedConfigArrayCandidates, pathValue);
+                                                                                        const defaultPatch = getDefaultLinkedConfigPatch(candidate ? [candidate] : [], feature.extensions);
+                                                                                        const inferredTargetDir = inferTargetDirFromLinkedConfig(feature.linkedConfigPath, candidate, feature.extensions);
+                                                                                        updateScriptFeature(feature.id, {
+                                                                                            linkedConfigTargetPath: pathValue,
+                                                                                            linkedConfigArrayPath: pathValue,
+                                                                                            linkedConfigPathSegments: getPathSegments(pathValue),
+                                                                                            linkedConfigKeyTemplate: feature.linkedConfigKeyTemplate || inferKeyTemplateFromExample(candidate?.examples[0]?.key),
+                                                                                            ...(feature.targetDir && feature.targetDir !== 'plugins'
+                                                                                                ? {}
+                                                                                                : inferredTargetDir
+                                                                                                  ? { targetDir: inferredTargetDir }
+                                                                                                  : {}),
+                                                                                            linkedConfigFilterKey: '',
+                                                                                            linkedConfigFilterValue: '',
+                                                                                            linkedConfigValueKey: defaultPatch.linkedConfigValueKey || '',
+                                                                                            linkedConfigSelectedFields: defaultPatch.linkedConfigSelectedFields || [],
+                                                                                        });
+                                                                                    }}
+                                                                                    sx={{ ...selectSx, minWidth: 180 }}
+                                                                                    MenuProps={{ slotProps: { paper: { sx: menuItemSx } } }}
+                                                                                >
+                                                                                    {pathOptions.map((option) => (
+                                                                                        <MenuItem key={option.value} value={option.value} sx={{ fontSize: 12 }}>
+                                                                                            {option.label}
+                                                                                        </MenuItem>
+                                                                                    ))}
+                                                                                </Select>
+                                                                                <Button
+                                                                                    size="small"
+                                                                                    variant="outlined"
+                                                                                    disabled={childPathOptions.length === 0}
+                                                                                    onClick={() => {
+                                                                                        const next = childPathOptions[0];
+                                                                                        if (!next) return;
+                                                                                        const candidate = findLinkedConfigCandidate(feature.linkedConfigArrayCandidates, next.value);
+                                                                                        updateScriptFeature(feature.id, {
+                                                                                            linkedConfigTargetPath: next.value,
+                                                                                            linkedConfigArrayPath: next.value,
+                                                                                            linkedConfigPathSegments: getPathSegments(next.value),
+                                                                                            linkedConfigKeyTemplate: feature.linkedConfigKeyTemplate || inferKeyTemplateFromExample(candidate?.examples[0]?.key),
+                                                                                        });
+                                                                                    }}
+                                                                                    sx={{ borderColor: 'var(--border-color)', color: 'var(--text-color)' }}
+                                                                                >
+                                                                                    경로 추가
+                                                                                </Button>
+                                                                                {childPathOptions.length > 0 && (
+                                                                                    <Select
+                                                                                        size="small"
+                                                                                        value=""
+                                                                                        displayEmpty
+                                                                                        onChange={(e) => {
+                                                                                            const pathValue = normalizeLinkedConfigPath(String(e.target.value));
+                                                                                            const candidate = findLinkedConfigCandidate(feature.linkedConfigArrayCandidates, pathValue);
+                                                                                            updateScriptFeature(feature.id, {
+                                                                                                linkedConfigTargetPath: pathValue,
+                                                                                                linkedConfigArrayPath: pathValue,
+                                                                                                linkedConfigPathSegments: getPathSegments(pathValue),
+                                                                                                linkedConfigKeyTemplate: feature.linkedConfigKeyTemplate || inferKeyTemplateFromExample(candidate?.examples[0]?.key),
+                                                                                            });
+                                                                                        }}
+                                                                                        sx={{ ...selectSx, minWidth: 180 }}
+                                                                                        MenuProps={{ slotProps: { paper: { sx: menuItemSx } } }}
+                                                                                    >
+                                                                                        <MenuItem value="" sx={{ fontSize: 12 }}>다음 경로 선택</MenuItem>
+                                                                                        {childPathOptions.map((option) => (
+                                                                                            <MenuItem key={option.value} value={option.value} sx={{ fontSize: 12 }}>
+                                                                                                {option.label}
+                                                                                            </MenuItem>
+                                                                                        ))}
+                                                                                    </Select>
+                                                                                )}
+                                                                                {preview && (
+                                                                                    <>
+                                                                                        <Select
+                                                                                            size="small"
+                                                                                            value={feature.linkedConfigFilterKey || ''}
+                                                                                            displayEmpty
+                                                                                            onChange={(e) => {
+                                                                                                const filterKey = String(e.target.value);
+                                                                                                updateScriptFeature(feature.id, {
+                                                                                                    linkedConfigFilterKey: filterKey,
+                                                                                                    linkedConfigFilterValue: '',
+                                                                                                    linkedConfigSelectedFields: preview.candidate.fields.filter((field) => field !== filterKey),
+                                                                                                });
+                                                                                            }}
+                                                                                            sx={{ ...selectSx, minWidth: 150 }}
+                                                                                            MenuProps={{ slotProps: { paper: { sx: menuItemSx } } }}
+                                                                                        >
+                                                                                            <MenuItem value="" sx={{ fontSize: 12 }}>필터 없음</MenuItem>
+                                                                                            {Object.keys(preview.candidate.filterValues).map((key) => (
+                                                                                                <MenuItem key={key} value={key} sx={{ fontSize: 12 }}>{key}</MenuItem>
+                                                                                            ))}
+                                                                                        </Select>
+                                                                                        <Select
+                                                                                            size="small"
+                                                                                            value={feature.linkedConfigFilterValue || ''}
+                                                                                            displayEmpty
+                                                                                            onChange={(e) => {
+                                                                                                const filterValue = String(e.target.value);
+                                                                                                const inferredTargetDir = inferTargetDirFromLinkedConfig(
+                                                                                                    feature.linkedConfigPath,
+                                                                                                    preview.candidate,
+                                                                                                    feature.extensions,
+                                                                                                    feature.linkedConfigFilterKey,
+                                                                                                    filterValue
+                                                                                                );
+                                                                                                updateScriptFeature(feature.id, {
+                                                                                                    linkedConfigFilterValue: filterValue,
+                                                                                                    ...(feature.targetDir && feature.targetDir !== 'plugins'
+                                                                                                        ? {}
+                                                                                                        : inferredTargetDir
+                                                                                                          ? { targetDir: inferredTargetDir }
+                                                                                                          : {}),
+                                                                                                });
+                                                                                            }}
+                                                                                            sx={{ ...selectSx, minWidth: 120 }}
+                                                                                            MenuProps={{ slotProps: { paper: { sx: menuItemSx } } }}
+                                                                                        >
+                                                                                            <MenuItem value="" sx={{ fontSize: 12 }}>전체</MenuItem>
+                                                                                            {(preview.candidate.filterValues[feature.linkedConfigFilterKey || ''] ?? []).map((value) => (
+                                                                                                <MenuItem key={value} value={value} sx={{ fontSize: 12 }}>{value}</MenuItem>
+                                                                                            ))}
+                                                                                        </Select>
+                                                                                    </>
+                                                                                )}
+                                                                            </Stack>
+                                                                        )}
+                                                                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                                                                            <TextField
+                                                                                size="small"
+                                                                                label="JSON key 생성 규칙"
+                                                                                value={feature.linkedConfigKeyTemplate || ''}
+                                                                                onChange={(e) => updateScriptFeature(feature.id, { linkedConfigKeyTemplate: e.target.value })}
+                                                                                sx={{ ...inputSx, flex: 1 }}
+                                                                                placeholder="예: portraits/png/$"
+                                                                            />
+                                                                            <Tooltip title="$는 추가되는 파일명으로 치환됩니다. 예: portraits/png/$ → portraits/png/test.png">
+                                                                                <IconButton size="small" sx={{ color: 'var(--text-color-light)' }}>
+                                                                                    <InfoOutlinedIcon fontSize="small" />
+                                                                                </IconButton>
+                                                                            </Tooltip>
+                                                                        </Stack>
+                                                                        {preview && (
+                                                                            <Box sx={{ p: 1, border: '1px solid var(--border-color)', borderRadius: 1 }}>
+                                                                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12 }}>
+                                                                                    대상: {preview.example.key} → {preview.targetPath} / 예시 파일 {preview.fileName} / 필터 결과 {preview.filteredCount}개
+                                                                                </Typography>
+                                                                                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 0.5, mt: 0.75 }}>
+                                                                                    {preview.fields.map((field) => {
+                                                                                        const checked = feature.linkedConfigSelectedFields?.includes(field) ?? true;
+                                                                                        return (
+                                                                                            <Stack key={field} direction="row" spacing={0.5} sx={{ alignItems: 'center', flex: '1 1 240px' }}>
+                                                                                                <FormControlLabel
+                                                                                                    control={
+                                                                                                        <Checkbox
+                                                                                                            size="small"
+                                                                                                            checked={checked}
+                                                                                                            onChange={(e) => {
+                                                                                                                const current = feature.linkedConfigSelectedFields ?? preview.fields;
+                                                                                                                updateScriptFeature(feature.id, {
+                                                                                                                    linkedConfigSelectedFields: e.target.checked
+                                                                                                                        ? [...new Set([...current, field])]
+                                                                                                                        : current.filter((item) => item !== field),
+                                                                                                                    linkedConfigFieldDefaults: {
+                                                                                                                        ...(feature.linkedConfigFieldDefaults ?? {}),
+                                                                                                                        [field]: feature.linkedConfigFieldDefaults?.[field] ?? preview.example.data[field] ?? '',
+                                                                                                                    },
+                                                                                                                });
+                                                                                                            }}
+                                                                                                        />
+                                                                                                    }
+                                                                                                    label={field}
+                                                                                                    sx={{ color: 'var(--text-color)', mr: 0 }}
+                                                                                                />
+                                                                                                {!checked && (
+                                                                                                    <TextField
+                                                                                                        size="small"
+                                                                                                        label="기본값"
+                                                                                                        value={String(feature.linkedConfigFieldDefaults?.[field] ?? preview.example.data[field] ?? '')}
+                                                                                                        onChange={(e) =>
+                                                                                                            updateScriptFeature(feature.id, {
+                                                                                                                linkedConfigFieldDefaults: {
+                                                                                                                    ...(feature.linkedConfigFieldDefaults ?? {}),
+                                                                                                                    [field]: e.target.value,
+                                                                                                                },
+                                                                                                            })
+                                                                                                        }
+                                                                                                        sx={{ ...inputSx, flex: 1 }}
+                                                                                                    />
+                                                                                                )}
+                                                                                            </Stack>
+                                                                                        );
+                                                                                    })}
+                                                                                </Stack>
+                                                                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12, mt: 0.5 }}>
+                                                                                    체크 해제한 항목은 모드 설정 UI에서 기본값을 반드시 입력하도록 처리됩니다.
+                                                                                </Typography>
+                                                                            </Box>
+                                                                        )}
+                                                                        {!preview && feature.linkedConfigPath && (
+                                                                            <Alert severity="info" sx={{ '& .MuiAlert-message': { fontSize: 12 } }}>
+                                                                                연동 JSON 내용을 펼쳐 예시 JSON을 입력하면 metadata field를 추론할 수 있습니다.
+                                                                            </Alert>
+                                                                        )}
+                                                                    </Stack>
+                                                                );
+                                                            })()}
+                                                            {false && ((feature.linkedConfigArrayCandidates ?? []).length > 0 ? (
                                                                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                                                                     <Select
                                                                         size="small"
@@ -1954,9 +2727,10 @@ function PackModDialog({
                                                                 <Alert severity="info" sx={{ '& .MuiAlert-message': { fontSize: 12 } }}>
                                                                     JSON이 비어 있거나 배열 후보를 찾지 못했습니다. 내용을 붙여넣은 뒤 배열 path를 직접 입력할 수 있습니다.
                                                                 </Alert>
-                                                            )}
+                                                            ))}
                                                         </Stack>
                                                     )}
+                                                    {renderSettingsPreview([feature])}
                                                 </Stack>
                                             )}
                                             {feature.type === 'cfg_fields' && (
@@ -1967,12 +2741,14 @@ function PackModDialog({
                                                         variant="outlined"
                                                         onClick={async () => {
                                                             const selected = await window.electronAPI.selectFile('.cfg');
+                                                            releaseNativeDialogFocus();
                                                             if (!selected) return;
                                                             const text = await window.electronAPI.readTextFile(selected);
+                                                            const cfgPath = `config/${selected.split(/[\\/]/).pop()}`;
                                                             updateScriptFeature(feature.id, {
-                                                                cfgPath: feature.cfgPath || `config/${selected.split(/[\\/]/).pop()}`,
+                                                                cfgPath,
                                                                 cfgText: text,
-                                                                fields: parseCfgFields(feature.cfgPath || `config/${selected.split(/[\\/]/).pop()}`, text),
+                                                                fields: parseCfgFields(cfgPath, text),
                                                             });
                                                         }}
                                                         sx={{ alignSelf: 'flex-start', borderColor: 'var(--border-color)', color: 'var(--text-color)' }}
@@ -2079,13 +2855,45 @@ function PackModDialog({
                 <Button
                     variant="contained"
                     onClick={handlePack}
-                    disabled={packing || !canLeaveBasicInfo || sourceCount === 0 || !savePath}
+                    disabled={packing || !canLeaveBasicInfo || sourceCount === 0 || !savePath || (dependencyEnabled && !dependencyTarget.trim())}
                     sx={{ background: 'var(--button-bg-color)', color: 'var(--button-text-color)' }}
                 >
                     {packing ? <CircularProgress size={18} /> : '패킹'}
                 </Button>
             </DialogActions>
         </Dialog>
+        <Dialog
+            open={helpOpen}
+            onClose={() => setHelpOpen(false)}
+            maxWidth="md"
+            fullWidth
+            slotProps={{ paper: { sx: { ...dialogPaperSx, maxHeight: '80vh' } } }}
+        >
+            <DialogTitle sx={{ color: 'var(--text-color)', borderBottom: '1px solid var(--border-color)' }}>
+                모드 패킹 설명서
+            </DialogTitle>
+            <DialogContent sx={{ pt: 2 }}>
+                <Typography
+                    component="pre"
+                    sx={{
+                        color: 'var(--text-color)',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        fontFamily: 'inherit',
+                        fontSize: 13,
+                        m: 0,
+                    }}
+                >
+                    {guideText || '설명서를 불러오는 중입니다.'}
+                </Typography>
+            </DialogContent>
+            <DialogActions sx={{ borderTop: '1px solid var(--border-color)' }}>
+                <Button onClick={() => setHelpOpen(false)} sx={{ color: 'var(--text-color-light)' }}>
+                    닫기
+                </Button>
+            </DialogActions>
+        </Dialog>
+        </>
     );
 }
 
@@ -2111,6 +2919,7 @@ function AddModDialog({
     const [name, setName] = useState('');
     const [author, setAuthor] = useState('');
     const [description, setDescription] = useState('');
+    const [version, setVersion] = useState('1.0.0');
     const [dllFiles, setDllFiles] = useState<DllFileEntry[]>([]);
 
     const [zipPath, setZipPath] = useState<string | null>(null);
@@ -2119,6 +2928,8 @@ function AddModDialog({
     const [zipName, setZipName] = useState('');
     const [zipAuthor, setZipAuthor] = useState('');
     const [zipDescription, setZipDescription] = useState('');
+    const [zipVersion, setZipVersion] = useState('');
+    const [zipDependency, setZipDependency] = useState<PackageDependency | undefined>(undefined);
     const [zipWarnings, setZipWarnings] = useState<string[]>([]);
 
     const [loadingZip, setLoadingZip] = useState(false);
@@ -2128,7 +2939,7 @@ function AddModDialog({
     const isZipMode = zipPath !== null;
     const zipDllCount = zipEntries.filter((entry) => entry.selectedType === 'dll' && !entry.isDirectory).length;
     const zipSingleDllError =
-        isZipMode && zipPackageType === 'single' && zipDllCount !== 1
+        isZipMode && zipPackageType === 'single' && zipDllCount > 1
             ? `단일 ZIP 모드는 DLL 파일이 정확히 1개여야 합니다. 현재 ${zipDllCount}개입니다.`
             : '';
 
@@ -2138,9 +2949,12 @@ function AddModDialog({
         setName('');
         setAuthor('');
         setDescription('');
+        setVersion('1.0.0');
         setDllFiles([]);
         setZipPath(null);
         setZipEntries([]);
+        setZipVersion('');
+        setZipDependency(undefined);
         setZipWarnings([]);
         setOnlineError('');
         setError('');
@@ -2214,6 +3028,8 @@ function AddModDialog({
                 setZipName(result.modInfo?.name ?? selected.split(/[\\/]/).pop()?.replace(/\.zip$/i, '') ?? '');
                 setZipAuthor(result.modInfo?.author ?? '');
                 setZipDescription(result.modInfo?.description ?? '');
+                setZipVersion(result.modInfo?.version ?? '');
+                setZipDependency(result.modInfo?.dependency);
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'ZIP 분석 실패');
             } finally {
@@ -2242,6 +3058,7 @@ function AddModDialog({
                 author,
                 description,
                 packageType,
+                version: version.trim() || undefined,
                 files: dllFiles,
             });
             onImport(result as ModPackage[], name || dllFiles[0]?.name || '모드');
@@ -2264,6 +3081,8 @@ function AddModDialog({
                 author: zipAuthor,
                 description: zipDescription,
                 packageType: zipPackageType,
+                version: zipVersion.trim() || undefined,
+                dependency: zipDependency,
                 files: zipEntries.map((e) => ({
                     entryName: e.entryName,
                     type: e.selectedType,
@@ -2475,6 +3294,8 @@ function AddModDialog({
                             <TextField size="small" label="제작자" value={zipAuthor}
                                 onChange={(e) => setZipAuthor(e.target.value)} sx={{ ...inputSx, flex: 1 }} />
                         </Box>
+                        <TextField size="small" label="버전" value={zipVersion}
+                            onChange={(e) => setZipVersion(e.target.value)} sx={inputSx} fullWidth />
                         <TextField size="small" label="설명" value={zipDescription}
                             onChange={(e) => setZipDescription(e.target.value)}
                             sx={multilineSx} multiline minRows={1} fullWidth />
@@ -2661,6 +3482,7 @@ function AddModDialog({
                     </Box>
                     <TextField label="표시 이름" value={name} onChange={(e) => setName(e.target.value)} sx={inputSx} />
                     <TextField label="제작자" value={author} onChange={(e) => setAuthor(e.target.value)} sx={inputSx} />
+                    <TextField label="버전" value={version} onChange={(e) => setVersion(e.target.value)} sx={inputSx} />
                     <TextField
                         label="설명"
                         value={description}
@@ -2703,6 +3525,7 @@ export default function ModManager() {
     const [updatingPackageId, setUpdatingPackageId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+    const [expandedDependencyIds, setExpandedDependencyIds] = useState<Set<string>>(new Set());
 
     const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
     const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -2732,6 +3555,15 @@ export default function ModManager() {
 
     const handleToggleExpand = (id: string) => {
         setExpandedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const handleToggleDependencyExpand = (id: string) => {
+        setExpandedDependencyIds((prev) => {
             const next = new Set(prev);
             if (next.has(id)) next.delete(id);
             else next.add(id);
@@ -2817,6 +3649,8 @@ export default function ModManager() {
         return pkg.enabled as boolean;
     };
 
+    const packageRows = buildPackageTreeRows(packages, expandedDependencyIds);
+
     return (
         <Box>
             {/* ── Header ── */}
@@ -2884,12 +3718,19 @@ export default function ModManager() {
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {packages.map((pkg) => {
+                        {packageRows.map(({ pkg, depth, hasDependents }) => {
                             const isExpanded = expandedIds.has(pkg.id);
+                            const isDependencyExpanded = expandedDependencyIds.has(pkg.id);
                             const isDisabled = pkg.enabled === false;
                             const state = enabledState(pkg);
                             const catalogItem = getCatalogItemForPackage(pkg);
                             const updateAvailable = Boolean(catalogItem?.updateAvailable);
+                            const dependencyWarning =
+                                pkg.dependencyState === 'missing'
+                                    ? '메인 모드 없음'
+                                    : pkg.dependencyState === 'disabled'
+                                      ? '메인 모드 비활성'
+                                      : '';
 
                             return [
                                 <TableRow
@@ -2918,6 +3759,16 @@ export default function ModManager() {
                                         />
                                     </TableCell>
                                     <TableCell sx={cellSx}>
+                                        <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
+                                        {hasDependents && (
+                                            <IconButton
+                                                size="small"
+                                                onClick={() => handleToggleDependencyExpand(pkg.id)}
+                                                sx={{ color: 'var(--primary-color)', p: 0 }}
+                                            >
+                                                {isDependencyExpanded ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
+                                            </IconButton>
+                                        )}
                                         {pkg.packageType === 'collection' && (
                                             <IconButton
                                                 size="small"
@@ -2931,9 +3782,36 @@ export default function ModManager() {
                                                 )}
                                             </IconButton>
                                         )}
+                                        </Stack>
                                     </TableCell>
-                                    <TableCell sx={{ ...cellSx, color: 'var(--text-color)', fontWeight: 600 }}>
+                                    <TableCell sx={{ ...cellSx, color: 'var(--text-color)', fontWeight: 600, pl: 1.5 + depth * 3 }}>
+                                        {depth > 0 && (
+                                            <Typography component="span" sx={{ color: 'var(--text-color-light)', mr: 1 }}>
+                                                └
+                                            </Typography>
+                                        )}
                                         {pkg.name}
+                                        {pkg.dependency && (
+                                            <Chip
+                                                label="종속"
+                                                size="small"
+                                                sx={{
+                                                    ml: 1,
+                                                    fontSize: 10,
+                                                    height: 18,
+                                                    background: 'rgba(80, 160, 255, 0.16)',
+                                                    color: 'var(--text-color)',
+                                                }}
+                                            />
+                                        )}
+                                        {dependencyWarning && (
+                                            <Chip
+                                                label={dependencyWarning}
+                                                size="small"
+                                                color="warning"
+                                                sx={{ ml: 1, fontSize: 10, height: 18 }}
+                                            />
+                                        )}
                                         {pkg.packageType === 'collection' && (
                                             <Chip
                                                 label="컬렉션"
@@ -3068,7 +3946,7 @@ export default function ModManager() {
                                                   />
                                               </TableCell>
                                               <TableCell sx={cellSx} />
-                                              <TableCell sx={{ ...cellSx, color: 'var(--text-color)', pl: 4 }}>
+                                              <TableCell sx={{ ...cellSx, color: 'var(--text-color)', pl: 4 + depth * 3 }}>
                                                   {dll.displayName}
                                                   <Typography
                                                       component="span"
@@ -3199,6 +4077,7 @@ export default function ModManager() {
             <PackModDialog
                 open={packDialogOpen}
                 onClose={() => setPackDialogOpen(false)}
+                packages={packages}
                 onPacked={(pkgs, pkgName) => {
                     setPackages(pkgs);
                     showNotification(`모드 패킹 완료: ${pkgName}`);

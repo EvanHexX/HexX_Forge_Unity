@@ -25,6 +25,8 @@ type GraphicsFileSelection = {
     name: string;
 };
 
+type GraphicsDropKind = 'video' | 'image';
+
 type VideoFilters = {
     chromaEnabled: boolean;
     keyColor: string;
@@ -130,6 +132,8 @@ type ShotcutVideoFilters = {
     };
 };
 
+type ColorChannel = 'r' | 'g' | 'b';
+
 type VideoExportOptions = {
     sourcePath: string;
     transform: PortraitTransform;
@@ -162,6 +166,10 @@ type ProgressPayload = {
 
 const GRAPHICS_DIR = getResourcePath('graphics');
 const GRAPHICS_CONFIG_PATH = getConfigPath('graphics_presets.json');
+const GRAPHICS_DROP_EXTENSIONS: Record<GraphicsDropKind, string[]> = {
+    video: ['.mp4', '.mov', '.webm', '.mkv', '.avi'],
+    image: ['.png', '.jpg', '.jpeg', '.webp', '.bmp'],
+};
 
 const PRESET_SIZE: Record<PortraitOutputPreset, { width: number; height: number }> = {
     standard: { width: 560, height: 700 },
@@ -296,6 +304,30 @@ export async function selectGraphicsImage(): Promise<GraphicsFileSelection | nul
     };
 }
 
+export function resolveDroppedGraphicsFile(params: { filePath?: string; kind?: GraphicsDropKind }): GraphicsFileSelection {
+    const filePath = params.filePath ? path.normalize(params.filePath) : '';
+    const kind = params.kind;
+
+    if (!filePath || !kind || !GRAPHICS_DROP_EXTENSIONS[kind]) {
+        throw new Error('Dropped file could not be resolved.');
+    }
+
+    if (!fs.existsSync(filePath)) {
+        throw new Error('Dropped file does not exist.');
+    }
+
+    const extension = path.extname(filePath).toLowerCase();
+    if (!GRAPHICS_DROP_EXTENSIONS[kind].includes(extension)) {
+        throw new Error(`Unsupported ${kind} file type: ${extension || 'unknown'}`);
+    }
+
+    return {
+        path: filePath,
+        url: toSelectedMediaProtocolUrl(filePath),
+        name: path.basename(filePath),
+    };
+}
+
 function getFfmpegDir(): string {
     return getResourcePath('tools', 'ffmpeg');
 }
@@ -309,9 +341,20 @@ function getFfmpegPath(binary: 'ffmpeg' | 'ffprobe'): string {
     return path.join(getFfmpegDir(), executable);
 }
 
+function getFfmpegEnv(): NodeJS.ProcessEnv {
+    const frei0rDir = getFrei0rFilterDir();
+    const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+    const currentPath = process.env[pathKey] || process.env.PATH || '';
+    return {
+        ...process.env,
+        FREI0R_PATH: frei0rDir,
+        [pathKey]: process.platform === 'win32' ? `${frei0rDir};${currentPath}` : `${frei0rDir}:${currentPath}`,
+    };
+}
+
 function runBinary(binaryPath: string, args: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
-        execFile(binaryPath, args, { windowsHide: true }, (error, stdout, stderr) => {
+        execFile(binaryPath, args, { windowsHide: true, env: getFfmpegEnv() }, (error, stdout, stderr) => {
             if (error) {
                 reject(new Error(stderr.trim() || error.message));
                 return;
@@ -320,6 +363,24 @@ function runBinary(binaryPath: string, args: string[]): Promise<string> {
             resolve(stdout.trim() || stderr.trim());
         });
     });
+}
+
+async function dryRunFrei0rPlugin(ffmpegPath: string, filterSpec: string): Promise<string> {
+    const args = [
+        '-hide_banner',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=c=green:s=16x16:d=0.1',
+        '-vf',
+        `format=rgba,frei0r=${filterSpec}`,
+        '-frames:v',
+        '1',
+        '-f',
+        'null',
+        '-',
+    ];
+    return runBinary(ffmpegPath, args);
 }
 
 export async function checkFfmpeg() {
@@ -343,6 +404,14 @@ export async function checkFfmpeg() {
         const supportsFrei0r = /\bfrei0r\b/.test(filterOutput);
         const requiredPlugins = ['select0r.dll', 'keyspillm0pup.dll', 'alpha0ps_alpha0ps.dll', 'saturat0r.dll'];
         const missingFrei0rPlugins = requiredPlugins.filter((fileName) => !fs.existsSync(path.join(getFrei0rFilterDir(), fileName)));
+        const failedFrei0rPlugins: string[] = [];
+        if (supportsFrei0r && !missingFrei0rPlugins.includes('select0r.dll')) {
+            try {
+                await dryRunFrei0rPlugin(ffmpegPath, 'select0r:#00cc00|n|0.2|0.2|0.2|0|0|0.5|0.9|0.5');
+            } catch {
+                failedFrei0rPlugins.push('select0r.dll');
+            }
+        }
 
         return {
             ok: true,
@@ -353,6 +422,7 @@ export async function checkFfmpeg() {
             supportsFrei0r,
             frei0rPath: getFrei0rFilterDir(),
             missingFrei0rPlugins,
+            failedFrei0rPlugins,
         };
     } catch (error) {
         return {
@@ -452,15 +522,7 @@ function buildShotcutFilterSegments(filters?: ShotcutVideoFilters): string[] {
 
     const grading = filters.colorGrading;
     if (grading?.enabled) {
-        const liftBrightness = (grading.lift.r + grading.lift.g + grading.lift.b) / 300;
-        const gammaR = wheelToScale(grading.gamma.r);
-        const gammaG = wheelToScale(grading.gamma.g);
-        const gammaB = wheelToScale(grading.gamma.b);
-        const gainR = wheelToScale(grading.gain.r);
-        const gainG = wheelToScale(grading.gain.g);
-        const gainB = wheelToScale(grading.gain.b);
-        result.push(`eq=brightness=${liftBrightness.toFixed(3)}:gamma_r=${gammaR.toFixed(3)}:gamma_g=${gammaG.toFixed(3)}:gamma_b=${gammaB.toFixed(3)}`);
-        result.push(`colorchannelmixer=rr=${gainR.toFixed(3)}:gg=${gainG.toFixed(3)}:bb=${gainB.toFixed(3)}`);
+        result.push(buildColorGradingExportFilter(grading));
     }
 
     return result;
@@ -471,6 +533,34 @@ function wheelToScale(value: number): number {
     if (wheel < 0.5) return Math.max(0.1, 0.5 + wheel);
     if (wheel === 0.5) return 1;
     return Math.min(2, wheel * 2);
+}
+
+function escapedClip(value: string, min: string, max: string): string {
+    return `clip(${value}\\,${min}\\,${max})`;
+}
+
+function buildColorGradingChannelExpression(lift: number, gamma: number, gain: number): string {
+    const liftAmount = ((Number.isFinite(lift) ? lift : 0) / 100) * 96.9;
+    const gammaScale = wheelToScale(Number.isFinite(gamma) ? gamma : 0);
+    const inverseGamma = 1 / Math.max(0.1, gammaScale);
+    const gainAmount = ((Number.isFinite(gain) ? gain : 0) / 100) * 0.85;
+    const lifted = `(val+${liftAmount.toFixed(4)}*(1-val/255))`;
+    const normalized = escapedClip(`${lifted}/255`, '0', '1');
+    const gammaAdjusted = `pow(${normalized}\\,${inverseGamma.toFixed(4)})*255`;
+    return escapedClip(`${gammaAdjusted}*(1+${gainAmount.toFixed(4)}*(val/255))`, '0', '255');
+}
+
+function buildColorGradingExportFilter(grading: NonNullable<ShotcutVideoFilters['colorGrading']>): string {
+    const channelMap: Array<[ColorChannel, string]> = [
+        ['r', 'r'],
+        ['g', 'g'],
+        ['b', 'b'],
+    ];
+    const parts = channelMap.map(([channel, ffmpegChannel]) => {
+        const expression = buildColorGradingChannelExpression(grading.lift[channel], grading.gamma[channel], grading.gain[channel]);
+        return `${ffmpegChannel}='${expression}'`;
+    });
+    return `lutrgb=${parts.join(':')}`;
 }
 
 function buildColorPresetFilter(preset: string): string {
@@ -565,10 +655,7 @@ function runFfmpegWithProgress({
     return new Promise((resolve, reject) => {
         const child = spawn(ffmpegPath, ['-nostats', '-progress', 'pipe:1', ...args], {
             windowsHide: true,
-            env: {
-                ...process.env,
-                FREI0R_PATH: getFrei0rFilterDir(),
-            },
+            env: getFfmpegEnv(),
         });
         let stdout = '';
         let stderr = '';
@@ -662,8 +749,11 @@ function buildVideoBranchFilters(options: VideoExportOptions, includeShotcut: bo
         'setpts=PTS-STARTPTS',
         'bwdif=mode=send_frame:parity=auto:deint=all',
     ];
+    const shotcutFilters = includeShotcut ? buildShotcutFilterSegments(options.filters.shotcutFilters) : [];
 
-    if (includeShotcut) filters.push(...buildShotcutFilterSegments(options.filters.shotcutFilters));
+    if (shotcutFilters.length) {
+        filters.push('format=rgba', ...shotcutFilters, 'format=rgba');
+    }
 
     if (options.interpolation === 'motion') {
         filters.push('minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1');
@@ -689,6 +779,25 @@ function buildVideoBranchFilters(options: VideoExportOptions, includeShotcut: bo
     }
 
     return filters;
+}
+
+function getEnabledShotcutFilterIds(filters?: ShotcutVideoFilters): string[] {
+    if (!filters) return [];
+    return Object.entries(filters)
+        .filter(([, value]) => Boolean((value as { enabled?: boolean } | undefined)?.enabled))
+        .map(([key]) => key);
+}
+
+function buildExportDiagnostics(status: Awaited<ReturnType<typeof checkFfmpeg>>, filterComplex: string, options: VideoExportOptions): string {
+    return [
+        'Graphics Tool export diagnostics',
+        `ffmpegPath=${status.ffmpegPath}`,
+        `ffprobePath=${status.ffprobePath}`,
+        `frei0rPath=${status.frei0rPath || getFrei0rFilterDir()}`,
+        `FREI0R_PATH=${getFrei0rFilterDir()}`,
+        `enabledShotcutFilters=${getEnabledShotcutFilterIds(options.filters.shotcutFilters).join(',') || 'none'}`,
+        `filter_complex=${filterComplex}`,
+    ].join('\n');
 }
 
 function buildVideoFilter(options: VideoExportOptions, hasChromaMask: boolean): string {
@@ -748,6 +857,10 @@ export async function exportPortraitVideo(options: VideoExportOptions, webConten
 
     const chromaMaskPath = options.chromaMaskDataUrl ? writeTempPngDataUrl(options.chromaMaskDataUrl, 'chroma_mask') : '';
     const filter = buildVideoFilter(options, Boolean(chromaMaskPath));
+    const diagnostics = buildExportDiagnostics(status, filter, options);
+    if (options.filters.shotcutFilters?.chromaKeyAdvanced?.enabled && !filter.includes('frei0r=select0r')) {
+        throw new Error(`Chroma Key: Advanced is enabled, but select0r was not added to the export filter graph.\n\n${diagnostics}`);
+    }
     const commandArgs = [
         '-y',
         '-i',
@@ -792,14 +905,19 @@ export async function exportPortraitVideo(options: VideoExportOptions, webConten
     );
 
     const durationSeconds = await probeDurationSeconds(status.ffprobePath, options.sourcePath);
-    await runFfmpegWithProgress({
-        ffmpegPath: status.ffmpegPath,
-        args: commandArgs,
-        durationSeconds,
-        webContents,
-        operationId: options.operationId,
-        type: 'export-video',
-    });
+    try {
+        await runFfmpegWithProgress({
+            ffmpegPath: status.ffmpegPath,
+            args: commandArgs,
+            durationSeconds,
+            webContents,
+            operationId: options.operationId,
+            type: 'export-video',
+        });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`${message}\n\n${diagnostics}`);
+    }
     return { path: filePath };
 }
 

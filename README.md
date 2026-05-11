@@ -12,15 +12,19 @@
 
 ### Project overview
 
-HexX Forge Unity is an Electron + React desktop tool for managing Unity-based game mods, fonts, and asset patches. It focuses on practical workflows for BepInEx mod packages, Unity asset replacement, backup/restore operations, and release updates through GitHub Releases.
+HexX Forge Unity is an Electron + React desktop tool for managing Unity-based game mods, fonts, and asset patches. It
+focuses on practical workflows for BepInEx mod packages, Unity asset replacement, backup/restore operations, and release
+updates through GitHub Releases.
 
 ### Features
 
 - **Mod Manager**: Manage BepInEx plugins and mod packages, including local packages and GitHub catalog packages.
-- **Asset Manager**: Back up original resources, replace textures, apply asset packs, extract fonts, replace fonts, and restore backups.
+- **Asset Manager**: Back up original resources, replace textures, apply asset packs, extract fonts, replace fonts, and
+  restore backups.
 - **Home**: Show supported game status, update badges, GitHub Releases news, and expandable feature cards.
 - **Settings**: Configure supported game install paths, theme, typography, language, and update behavior.
-- **Graphics Tool / Cheat Engine / Optimizer**: Provide expansion surfaces for graphics workflows, cheat tooling, and external optimization tools.
+- **Graphics Tool / Cheat Engine / Optimizer**: Provide expansion surfaces for graphics workflows, cheat tooling, and
+  external optimization tools.
 
 ### Current status
 
@@ -38,12 +42,13 @@ HexX Forge Unity is an Electron + React desktop tool for managing Unity-based ga
 - Run the development app with `npm run dev`.
 - Build renderer and main process outputs with `npm run build`.
 - Create local Windows package artifacts with `npm.cmd run dist`.
-- Windows uses NSIS auto updates. macOS targets are configured, but production auto-update validation requires Developer ID signing and notarization.
+- Windows uses NSIS auto updates. macOS targets are configured, but production auto-update validation requires Developer
+  ID signing and notarization.
 
 ### Contributors
 
-| Contributor | Contributions |
-| --- | --- |
+| Contributor                                                                                                                                               | Contributions                       |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|
 | `바나나12349ㄴ` ![Test Images](https://img.shields.io/badge/Role-Test%20Images-EC4899) ![Beta Tester](https://img.shields.io/badge/Role-Beta%20Tester-6366F1) | Test image production, beta testing |
 
 ### Documentation links
@@ -62,7 +67,8 @@ HexX Forge Unity is an Electron + React desktop tool for managing Unity-based ga
 
 ### 프로젝트 개요
 
-HexX Forge Unity는 Unity 기반 게임의 모드, 폰트, 어셋 패치를 관리하는 Electron + React 데스크톱 도구입니다. BepInEx 모드 패키지, Unity asset 교체, 백업/복원 작업, GitHub Releases 기반 업데이트 흐름을 실무적으로 다루는 데 초점을 둡니다.
+HexX Forge Unity는 Unity 기반 게임의 모드, 폰트, 어셋 패치를 관리하는 Electron + React 데스크톱 도구입니다. BepInEx 모드 패키지, Unity asset 교체, 백업/복원
+작업, GitHub Releases 기반 업데이트 흐름을 실무적으로 다루는 데 초점을 둡니다.
 
 ### 주요 기능
 
@@ -88,12 +94,13 @@ HexX Forge Unity는 Unity 기반 게임의 모드, 폰트, 어셋 패치를 관�
 - 개발 앱은 `npm run dev`로 실행합니다.
 - Renderer와 main process output은 `npm run build`로 빌드합니다.
 - 로컬 Windows package artifact는 `npm.cmd run dist`로 생성합니다.
-- Windows는 NSIS auto update를 사용합니다. macOS target은 설정되어 있지만 production auto-update 검증에는 Developer ID signing과 notarization이 필요합니다.
+- Windows는 NSIS auto update를 사용합니다. macOS target은 설정되어 있지만 production auto-update 검증에는 Developer ID signing과
+  notarization이 필요합니다.
 
 ### 기여자
 
-| Contributor | Contributions |
-| --- | --- |
+| Contributor                                                                                                                                               | Contributions      |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
 | `바나나12349ㄴ` ![Test Images](https://img.shields.io/badge/Role-Test%20Images-EC4899) ![Beta Tester](https://img.shields.io/badge/Role-Beta%20Tester-6366F1) | 테스트용 이미지 제작, 베타테스터 |
 
 ### 문서 링크
@@ -112,7 +119,8 @@ HexX Forge Unity는 Unity 기반 게임의 모드, 폰트, 어셋 패치를 관�
 
 ### 项目概览
 
-HexX Forge Unity 是一个基于 Electron + React 的桌面工具，用于管理 Unity 游戏的 Mod、字体和资源补丁。它专注于 BepInEx Mod 包、Unity asset 替换、备份/恢复操作，以及基于 GitHub Releases 的更新流程。
+HexX Forge Unity 是一个基于 Electron + React 的桌面工具，用于管理 Unity 游戏的 Mod、字体和资源补丁。它专注于 BepInEx Mod
+包、Unity asset 替换、备份/恢复操作，以及基于 GitHub Releases 的更新流程。
 
 ### 主要功能
 
@@ -138,12 +146,13 @@ HexX Forge Unity 是一个基于 Electron + React 的桌面工具，用于管理
 - 使用 `npm run dev` 运行开发版应用。
 - 使用 `npm run build` 构建 renderer 和 main process 输出。
 - 使用 `npm.cmd run dist` 生成本地 Windows package artifact。
-- Windows 使用 NSIS auto update。macOS target 已配置，但生产环境 auto-update 验证需要 Developer ID signing 和 notarization。
+- Windows 使用 NSIS auto update。macOS target 已配置，但生产环境 auto-update 验证需要 Developer ID signing 和
+  notarization。
 
 ### 贡献者
 
-| Contributor | Contributions |
-| --- | --- |
+| Contributor                                                                                                                                               | Contributions   |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------|
 | `바나나12349ㄴ` ![Test Images](https://img.shields.io/badge/Role-Test%20Images-EC4899) ![Beta Tester](https://img.shields.io/badge/Role-Beta%20Tester-6366F1) | 测试用图片制作，Beta 测试 |
 
 ### 文档链接

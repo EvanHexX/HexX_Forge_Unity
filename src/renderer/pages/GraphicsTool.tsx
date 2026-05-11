@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Dispatch, PointerEvent, ReactNode, SetStateAction } from 'react';
+import type { Dispatch, DragEvent, PointerEvent, ReactNode, SetStateAction } from 'react';
 import {
     Alert,
     Box,
@@ -89,6 +89,7 @@ type FfmpegStatus = {
     supportsFrei0r?: boolean;
     frei0rPath?: string;
     missingFrei0rPlugins?: string[];
+    failedFrei0rPlugins?: string[];
 };
 
 type ColorPresetConfig = {
@@ -174,14 +175,27 @@ type ShotcutVideoFilters = {
     };
 };
 
-type SeekRequest = {
-    id: number;
-    seconds: number;
+type PlaybackState = {
+    currentTime: number;
+    duration: number;
+    playing: boolean;
 };
 
-type StopRequest = {
-    id: number;
+type VideoPreviewController = {
+    play: () => Promise<void>;
+    pause: () => void;
+    stop: () => void;
+    seek: (seconds: number) => Promise<void>;
+    getState: () => PlaybackState;
 };
+
+type VideoFrameCallbackVideo = HTMLVideoElement & {
+    requestVideoFrameCallback?: (callback: () => void) => number;
+    cancelVideoFrameCallback?: (handle: number) => void;
+};
+
+type ColorGradingGroup = 'lift' | 'gamma' | 'gain';
+type ColorChannel = 'r' | 'g' | 'b';
 
 type ChromaMaskState = {
     enabled: boolean;
@@ -490,13 +504,52 @@ function wheelToScale(value: number): number {
     return wheel * 2;
 }
 
-function buildColorGradingFilter(filters: ShotcutVideoFilters): string {
-    const grading = filters.colorGrading;
-    if (!grading.enabled) return '';
-    const liftBrightness = (grading.lift.r + grading.lift.g + grading.lift.b) / 300;
-    const gammaAverage = (grading.gamma.r + grading.gamma.g + grading.gamma.b) / 300;
-    const gain = (wheelToScale(grading.gain.r) + wheelToScale(grading.gain.g) + wheelToScale(grading.gain.b)) / 3;
-    return `brightness(${Math.max(0.1, 1 + liftBrightness + gammaAverage)}) contrast(${Math.max(0.1, gain)})`;
+function clampByte(value: number): number {
+    return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function clampPercent(value: number): number {
+    return Math.max(-100, Math.min(100, Number(value.toFixed(1))));
+}
+
+function spinnerToWheel(value: number): number {
+    return (clampPercent(value) / 100 + 1) / 2;
+}
+
+function applyColorGradingChannel(channelValue: number, lift: number, gamma: number, gain: number): number {
+    const normalized = Math.max(0, Math.min(1, channelValue / 255));
+    const lifted = Math.max(0, Math.min(1, normalized + (lift / 100) * 0.38 * (1 - normalized)));
+    const gammaScale = wheelToScale(gamma);
+    const gammaAdjusted = Math.pow(lifted, 1 / Math.max(0.1, gammaScale));
+    const gained = gammaAdjusted * (1 + (gain / 100) * 0.85 * gammaAdjusted);
+    return clampByte(gained * 255);
+}
+
+function getGroupMasterValue(groupValue: Record<ColorChannel, number>): number {
+    return Number(((groupValue.r + groupValue.g + groupValue.b) / 3).toFixed(1));
+}
+
+function hslToRgb(hue: number, saturation: number, lightness: number): Record<ColorChannel, number> {
+    const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+    const huePrime = hue / 60;
+    const x = chroma * (1 - Math.abs((huePrime % 2) - 1));
+    let r = 0;
+    let g = 0;
+    let b = 0;
+
+    if (huePrime >= 0 && huePrime < 1) [r, g, b] = [chroma, x, 0];
+    else if (huePrime < 2) [r, g, b] = [x, chroma, 0];
+    else if (huePrime < 3) [r, g, b] = [0, chroma, x];
+    else if (huePrime < 4) [r, g, b] = [0, x, chroma];
+    else if (huePrime < 5) [r, g, b] = [x, 0, chroma];
+    else [r, g, b] = [chroma, 0, x];
+
+    const m = lightness - chroma / 2;
+    return {
+        r: clampPercent(((r + m) * 2 - 1) * 100),
+        g: clampPercent(((g + m) * 2 - 1) * 100),
+        b: clampPercent(((b + m) * 2 - 1) * 100),
+    };
 }
 
 function getLocalizedLabel(labels: Record<string, string> | undefined, language: LanguageCode, fallback: string): string {
@@ -573,6 +626,13 @@ function applyApproximateShotcutPreview(data: ImageData, options: ShotcutPreview
                 data.data[i + 3] = Math.round(data.data[i + 3] * Math.max(0, Math.min(1, alpha.amount * 2)));
             }
             if (alpha.invert) data.data[i + 3] = 255 - data.data[i + 3];
+        }
+
+        const grading = options.filters.colorGrading;
+        if (grading.enabled) {
+            data.data[i] = applyColorGradingChannel(data.data[i], grading.lift.r, grading.gamma.r, grading.gain.r);
+            data.data[i + 1] = applyColorGradingChannel(data.data[i + 1], grading.lift.g, grading.gamma.g, grading.gain.g);
+            data.data[i + 2] = applyColorGradingChannel(data.data[i + 2], grading.lift.b, grading.gamma.b, grading.gain.b);
         }
     }
 }
@@ -893,6 +953,7 @@ function VideoTimeline({
     disabled,
     playing,
     busy,
+    seekStatusText,
     onSeek,
     onPlay,
     onPause,
@@ -906,6 +967,7 @@ function VideoTimeline({
     disabled: boolean;
     playing: boolean;
     busy: boolean;
+    seekStatusText?: string;
     onSeek: (seconds: number) => void;
     onPlay: () => void;
     onPause: () => void;
@@ -914,63 +976,109 @@ function VideoTimeline({
     onExport: () => void;
     language: LanguageCode;
 }) {
+    const rulerRef = useRef<HTMLDivElement | null>(null);
+    const dragFrameRef = useRef<number | null>(null);
+    const lastPointerSecondsRef = useRef<number | null>(null);
+    const [dragging, setDragging] = useState(false);
+    const [draftTime, setDraftTime] = useState<number | null>(null);
     const safeDuration = Math.max(0, duration);
-    const safeCurrent = Math.max(0, Math.min(currentTime, safeDuration || 0));
+    const displayTime = draftTime ?? currentTime;
+    const safeCurrent = Math.max(0, Math.min(displayTime, safeDuration || 0));
     const majorTickCount = Math.max(1, Math.ceil(safeDuration));
     const majorTicks = Array.from({ length: majorTickCount + 1 }, (_, index) => index).filter((value) => value <= safeDuration || value === 0);
     const playheadPercent = safeDuration > 0 ? (safeCurrent / safeDuration) * 100 : 0;
 
-    const handleRangeChange = (value: string) => {
-        const next = Number(value);
-        if (Number.isFinite(next)) onSeek(next);
+    useEffect(() => {
+        if (!dragging) setDraftTime(null);
+    }, [currentTime, dragging]);
+
+    const getPointerSeconds = (event: PointerEvent<HTMLDivElement>) => {
+        const rect = rulerRef.current?.getBoundingClientRect();
+        if (!rect || safeDuration <= 0 || disabled) return null;
+        const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+        return Number((ratio * safeDuration).toFixed(3));
     };
 
+    const commitSeek = (seconds: number) => {
+        setDraftTime(seconds);
+        onSeek(seconds);
+    };
+
+    const seekFromPointer = (event: PointerEvent<HTMLDivElement>, throttle = false) => {
+        const seconds = getPointerSeconds(event);
+        if (seconds === null) return;
+        lastPointerSecondsRef.current = seconds;
+        if (!throttle) {
+            commitSeek(seconds);
+            return;
+        }
+        if (dragFrameRef.current !== null) return;
+        dragFrameRef.current = window.requestAnimationFrame(() => {
+            dragFrameRef.current = null;
+            if (lastPointerSecondsRef.current !== null) commitSeek(lastPointerSecondsRef.current);
+        });
+    };
+
+    useEffect(() => {
+        return () => {
+            if (dragFrameRef.current !== null) window.cancelAnimationFrame(dragFrameRef.current);
+        };
+    }, []);
+
     return (
-        <Paper sx={{ ...innerPanelSx, mt: 1.5, p: 1, background: '#2f2f2f' }}>
-            <Tooltip title={t('graphics.tooltip.timeline', language)} arrow>
-                <Box sx={{ position: 'relative', height: 38, border: '1px solid #1e1e1e', background: '#151515', overflow: 'hidden' }}>
-                    <Box
-                        component="input"
-                        type="range"
-                        min={0}
-                        max={safeDuration || 0}
-                        step={0.001}
-                        value={safeCurrent}
-                        disabled={disabled || safeDuration <= 0}
-                        onChange={(event) => handleRangeChange(event.target.value)}
-                        sx={{
-                            position: 'absolute',
-                            inset: 0,
-                            width: '100%',
-                            height: '100%',
-                            m: 0,
-                            opacity: 0,
-                            cursor: disabled || safeDuration <= 0 ? 'default' : 'pointer',
-                            zIndex: 3,
-                        }}
-                    />
+        <Paper sx={{ ...innerPanelSx, mt: 1.5, p: 1 }}>
+            <Box
+                ref={rulerRef}
+                onPointerDown={(event) => {
+                    if (disabled || safeDuration <= 0) return;
+                    setDragging(true);
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    seekFromPointer(event, false);
+                }}
+                onPointerMove={(event) => {
+                    if (!dragging) return;
+                    seekFromPointer(event, true);
+                }}
+                onPointerUp={(event) => {
+                    setDragging(false);
+                    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                        event.currentTarget.releasePointerCapture(event.pointerId);
+                    }
+                    lastPointerSecondsRef.current = null;
+                }}
+                onPointerCancel={() => setDragging(false)}
+                sx={{
+                    position: 'relative',
+                    height: 38,
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--bg-color)',
+                    overflow: 'hidden',
+                    cursor: disabled || safeDuration <= 0 ? 'default' : 'pointer',
+                    touchAction: 'none',
+                }}
+            >
                     {majorTicks.map((tick) => {
                         const left = safeDuration > 0 ? (tick / safeDuration) * 100 : 0;
                         return (
-                            <Box key={tick} sx={{ position: 'absolute', left: `${left}%`, top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,0.75)' }}>
+                            <Box key={tick} sx={{ position: 'absolute', left: `${left}%`, top: 0, bottom: 0, borderLeft: '1px solid var(--text-color-light)', opacity: 0.85 }}>
                                 <Typography
                                     sx={{
                                         position: 'absolute',
                                         left: 2,
                                         top: 4,
-                                        color: '#f2f2f2',
+                                        color: 'var(--text-color)',
                                         fontFamily: 'monospace',
                                         fontSize: 12,
                                         lineHeight: 1,
-                                        textShadow: '1px 1px 0 #003a68',
+                                        textShadow: '0 1px 0 var(--bg-color)',
                                         whiteSpace: 'nowrap',
                                     }}
                                 >
                                     {formatRulerTime(tick)}
                                 </Typography>
-                                <Box sx={{ position: 'absolute', left: -1, bottom: 0, width: 1, height: 12, background: 'rgba(255,255,255,0.85)' }} />
+                                <Box sx={{ position: 'absolute', left: -1, bottom: 0, width: 1, height: 12, background: 'var(--text-color-light)' }} />
                                 {tick < safeDuration && (
-                                    <Box sx={{ position: 'absolute', left: '50%', bottom: 0, width: 1, height: 6, background: 'rgba(255,255,255,0.6)' }} />
+                                    <Box sx={{ position: 'absolute', left: '50%', bottom: 0, width: 1, height: 6, background: 'var(--border-color)' }} />
                                 )}
                             </Box>
                         );
@@ -982,7 +1090,7 @@ function VideoTimeline({
                             top: 0,
                             bottom: 0,
                             width: 2,
-                            background: '#d8d8d8',
+                            background: 'var(--primary-color)',
                             transform: 'translateX(-1px)',
                             pointerEvents: 'none',
                             zIndex: 2,
@@ -995,21 +1103,20 @@ function VideoTimeline({
                                 height: 0,
                                 borderLeft: '6px solid transparent',
                                 borderRight: '6px solid transparent',
-                                borderTop: '7px solid #e8e8e8',
+                                borderTop: '7px solid var(--primary-color)',
                             },
                         }}
                     />
-                </Box>
-            </Tooltip>
+            </Box>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between', mt: 1, gap: 1, flexWrap: 'wrap' }}>
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 230 }}>
                     <Box
                         sx={{
                             px: 0.75,
                             py: 0.35,
-                            border: '1px solid #555',
-                            background: '#202020',
-                            color: '#fff',
+                            border: '1px solid var(--border-color)',
+                            background: 'var(--input-bg-color)',
+                            color: 'var(--text-color)',
                             borderRadius: 0.5,
                             fontFamily: 'monospace',
                             fontSize: 12,
@@ -1017,21 +1124,26 @@ function VideoTimeline({
                     >
                         {formatTimelineTime(safeCurrent)}
                     </Box>
-                    <Typography sx={{ color: '#cfcfcf', fontFamily: 'monospace', fontSize: 12 }}>/ {formatTimelineTime(safeDuration)}</Typography>
+                    <Typography sx={{ color: 'var(--text-color-light)', fontFamily: 'monospace', fontSize: 12 }}>/ {formatTimelineTime(safeDuration)}</Typography>
+                    {seekStatusText && (
+                        <Typography sx={{ color: 'var(--primary-color)', fontSize: 12 }}>
+                            {seekStatusText}
+                        </Typography>
+                    )}
                 </Stack>
                 <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                     <TooltipButton title={t('graphics.tooltip.play', language)}>
-                        <IconButton size="small" disabled={disabled || playing} onClick={onPlay} sx={{ color: '#e8e8e8' }}>
+                        <IconButton size="small" disabled={disabled || playing} onClick={onPlay} sx={{ color: 'var(--text-color)' }}>
                             <PlayArrowIcon fontSize="small" />
                         </IconButton>
                     </TooltipButton>
                     <TooltipButton title={t('graphics.tooltip.pause', language)}>
-                        <IconButton size="small" disabled={disabled || !playing} onClick={onPause} sx={{ color: '#e8e8e8' }}>
+                        <IconButton size="small" disabled={disabled || !playing} onClick={onPause} sx={{ color: 'var(--text-color)' }}>
                             <PauseIcon fontSize="small" />
                         </IconButton>
                     </TooltipButton>
                     <TooltipButton title={t('graphics.tooltip.stop', language)}>
-                        <IconButton size="small" disabled={disabled} onClick={onStop} sx={{ color: '#e8e8e8' }}>
+                        <IconButton size="small" disabled={disabled} onClick={onStop} sx={{ color: 'var(--text-color)' }}>
                             <StopIcon fontSize="small" />
                         </IconButton>
                     </TooltipButton>
@@ -1048,6 +1160,168 @@ function VideoTimeline({
                 </Stack>
             </Stack>
         </Paper>
+    );
+}
+
+function ColorWheelPanel({
+    title,
+    value,
+    language,
+    onChange,
+    onReset,
+}: {
+    title: string;
+    value: Record<ColorChannel, number>;
+    language: LanguageCode;
+    onChange: (value: Record<ColorChannel, number>) => void;
+    onReset: () => void;
+}) {
+    const wheelRef = useRef<HTMLDivElement | null>(null);
+    const master = getGroupMasterValue(value);
+    const pointerX = `${spinnerToWheel(value.r) * 100}%`;
+    const pointerY = `${(1 - spinnerToWheel(value.b)) * 100}%`;
+
+    const setChannel = (channel: ColorChannel, nextValue: number) => {
+        onChange({ ...value, [channel]: clampPercent(nextValue) });
+    };
+
+    const setMaster = (nextMaster: number) => {
+        const delta = clampPercent(nextMaster) - master;
+        onChange({
+            r: clampPercent(value.r + delta),
+            g: clampPercent(value.g + delta),
+            b: clampPercent(value.b + delta),
+        });
+    };
+
+    const setFromWheelPointer = (event: PointerEvent<HTMLDivElement>) => {
+        const rect = wheelRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const dx = event.clientX - centerX;
+        const dy = event.clientY - centerY;
+        const radius = Math.min(1, Math.hypot(dx, dy) / (rect.width / 2));
+        const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+        const hue = (angle + 360) % 360;
+        const lightness = 0.5 + (master / 100) * 0.25;
+        onChange(hslToRgb(hue, radius, Math.max(0, Math.min(1, lightness))));
+    };
+
+    return (
+        <Paper sx={{ ...innerPanelSx, p: 1.25 }}>
+            <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1 }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 700 }}>{title}</Typography>
+                <Button size="small" variant="outlined" sx={outlinedButtonSx} onClick={onReset}>
+                    {t('graphics.filters.groupReset', language)}
+                </Button>
+            </Stack>
+            <Stack direction="row" spacing={1.25} sx={{ alignItems: 'stretch' }}>
+                <Box
+                    ref={wheelRef}
+                    onPointerDown={(event) => {
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        setFromWheelPointer(event);
+                    }}
+                    onPointerMove={(event) => {
+                        if (event.buttons !== 1) return;
+                        setFromWheelPointer(event);
+                    }}
+                    sx={{
+                        position: 'relative',
+                        width: 'min(100%, 180px)',
+                        aspectRatio: '1 / 1',
+                        borderRadius: '50%',
+                        background:
+                            'radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 62%), conic-gradient(red, magenta, blue, cyan, lime, yellow, red)',
+                        border: '1px solid var(--border-color)',
+                        boxShadow: 'inset 0 0 18px rgba(0,0,0,0.28)',
+                        cursor: 'crosshair',
+                        touchAction: 'none',
+                    }}
+                >
+                    <Box
+                        sx={{
+                            position: 'absolute',
+                            left: pointerX,
+                            top: pointerY,
+                            width: 10,
+                            height: 10,
+                            borderRadius: '50%',
+                            background: 'var(--text-color)',
+                            border: '2px solid var(--bg-color)',
+                            transform: 'translate(-50%, -50%)',
+                            boxShadow: '0 0 0 1px var(--border-color)',
+                            pointerEvents: 'none',
+                        }}
+                    />
+                </Box>
+                <Stack spacing={0.5} sx={{ alignItems: 'center', minWidth: 44 }}>
+                    <Typography sx={{ color: 'var(--text-color-light)', fontSize: 11 }}>{t('graphics.filters.master', language)}</Typography>
+                    <Slider
+                        orientation="vertical"
+                        value={master}
+                        min={-100}
+                        max={100}
+                        step={0.1}
+                        onChange={(_, next) => setMaster(Array.isArray(next) ? next[0] : next)}
+                        sx={{ ...sliderSx, height: 160 }}
+                    />
+                </Stack>
+            </Stack>
+            <Stack spacing={0.25} sx={{ mt: 1 }}>
+                {(['r', 'g', 'b'] as const).map((channel) => (
+                    <ControlSlider
+                        key={`${title}-${channel}`}
+                        label={channel.toUpperCase()}
+                        value={value[channel]}
+                        min={-100}
+                        max={100}
+                        step={0.1}
+                        decimals={1}
+                        suffix="%"
+                        showInput
+                        onChange={(nextValue) => setChannel(channel, nextValue)}
+                    />
+                ))}
+            </Stack>
+        </Paper>
+    );
+}
+
+function ColorGradingControl({
+    value,
+    language,
+    onChange,
+}: {
+    value: ShotcutVideoFilters['colorGrading'];
+    language: LanguageCode;
+    onChange: (value: ShotcutVideoFilters['colorGrading']) => void;
+}) {
+    const setGroup = (group: ColorGradingGroup, groupValue: Record<ColorChannel, number>) => {
+        onChange({ ...value, [group]: groupValue });
+    };
+
+    const resetGroup = (group: ColorGradingGroup) => {
+        setGroup(group, DEFAULT_SHOTCUT_FILTERS.colorGrading[group]);
+    };
+
+    return (
+        <Stack spacing={1}>
+            {(['lift', 'gamma', 'gain'] as const).map((group) => (
+                <ColorWheelPanel
+                    key={group}
+                    title={t(`graphics.filters.${group}` as any, language)}
+                    value={value[group]}
+                    language={language}
+                    onChange={(groupValue) => setGroup(group, groupValue)}
+                    onReset={() => resetGroup(group)}
+                />
+            ))}
+            <Button size="small" variant="outlined" sx={outlinedButtonSx} onClick={() => onChange(DEFAULT_SHOTCUT_FILTERS.colorGrading)}>
+                {t('graphics.filters.resetPreset', language)}
+            </Button>
+        </Stack>
     );
 }
 
@@ -1231,25 +1505,31 @@ function OverlaySettingsPanel({
 function CanvasFilteredMedia({
     media,
     mediaKind,
-    playing,
-    stopRequest,
-    seekRequest,
     onPlaybackState,
+    onVideoControllerReady,
     preview,
 }: {
     media: GraphicsFile;
     mediaKind: 'video' | 'image';
-    playing?: boolean;
-    stopRequest?: StopRequest;
-    seekRequest?: SeekRequest;
-    onPlaybackState?: (state: { currentTime: number; duration: number }) => void;
+    onPlaybackState?: (state: PlaybackState) => void;
+    onVideoControllerReady?: (controller: VideoPreviewController | null) => void;
     preview: ShotcutPreviewOptions;
 }) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const imageRef = useRef<HTMLImageElement | null>(null);
     const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    const lastStopRequestIdRef = useRef<number | undefined>(undefined);
+    const onPlaybackStateRef = useRef(onPlaybackState);
+    const lastPublishedStateRef = useRef<PlaybackState | null>(null);
+    const pendingSeekRef = useRef<{ seconds: number; until: number } | null>(null);
+    const lastCommandedTimeRef = useRef<number | null>(null);
+    const pendingSeekTimeoutRef = useRef<number | null>(null);
+    const pendingSeekResolveRef = useRef<(() => void) | null>(null);
+    const requestDrawRef = useRef<(() => void) | null>(null);
+
+    useEffect(() => {
+        onPlaybackStateRef.current = onPlaybackState;
+    }, [onPlaybackState]);
 
     useEffect(() => {
         let disposed = false;
@@ -1262,79 +1542,248 @@ function CanvasFilteredMedia({
     }, [preview.chromaMaskDataUrl]);
 
     useEffect(() => {
-        const video = videoRef.current;
-        if (!video) return;
+        return () => {
+            if (pendingSeekTimeoutRef.current !== null) {
+                window.clearTimeout(pendingSeekTimeoutRef.current);
+                pendingSeekTimeoutRef.current = null;
+            }
+            pendingSeekResolveRef.current?.();
+            pendingSeekResolveRef.current = null;
+        };
+    }, []);
 
-        if (playing) {
-            void video.play();
-        } else {
-            video.pause();
+    useEffect(() => {
+        pendingSeekRef.current = null;
+        if (pendingSeekTimeoutRef.current !== null) {
+            window.clearTimeout(pendingSeekTimeoutRef.current);
+            pendingSeekTimeoutRef.current = null;
         }
-    }, [playing, media.url]);
+        lastCommandedTimeRef.current = null;
+        lastPublishedStateRef.current = null;
+        pendingSeekResolveRef.current?.();
+        pendingSeekResolveRef.current = null;
+    }, [media.url]);
+
+    const getVideoState = (video: HTMLVideoElement): PlaybackState => ({
+        currentTime: video.currentTime,
+        duration: Number.isFinite(video.duration) ? video.duration : 0,
+        playing: !video.paused && !video.ended,
+    });
+
+    const publishVideoState = (video: HTMLVideoElement, sourceEvent: string) => {
+        const pendingSeek = pendingSeekRef.current;
+        if (
+            pendingSeek &&
+            sourceEvent !== 'seeked' &&
+            Date.now() < pendingSeek.until &&
+            (video.currentTime <= 0.05 || Math.abs(video.currentTime - pendingSeek.seconds) > 0.75)
+        ) {
+            return;
+        }
+
+        const next = getVideoState(video);
+        const prev = lastPublishedStateRef.current;
+        if (
+            prev &&
+            Math.abs(prev.currentTime - next.currentTime) < 0.016 &&
+            Math.abs(prev.duration - next.duration) < 0.016 &&
+            prev.playing === next.playing
+        ) {
+            return;
+        }
+
+        lastPublishedStateRef.current = next;
+        onPlaybackStateRef.current?.(next);
+    };
+
+    const safelyPlayVideo = async (video: HTMLVideoElement) => {
+        try {
+            await video.play();
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') return;
+            if (import.meta.env.DEV) console.debug('[GraphicsTool] video play interrupted', error);
+        }
+    };
+
+    const settlePendingSeek = (video: HTMLVideoElement, sourceEvent: string) => {
+        if (pendingSeekTimeoutRef.current !== null) {
+            window.clearTimeout(pendingSeekTimeoutRef.current);
+            pendingSeekTimeoutRef.current = null;
+        }
+        const resolve = pendingSeekResolveRef.current;
+        pendingSeekResolveRef.current = null;
+        pendingSeekRef.current = null;
+        if (import.meta.env.DEV) {
+            console.debug('[GraphicsTool] seek resolved', {
+                sourceEvent,
+                currentTime: video.currentTime,
+                commandedTime: lastCommandedTimeRef.current,
+            });
+        }
+        resolve?.();
+        publishVideoState(video, sourceEvent);
+        requestDrawRef.current?.();
+    };
+
+    const commitSeek = (video: HTMLVideoElement, seconds: number): Promise<void> => {
+        if (!Number.isFinite(seconds)) return Promise.resolve();
+        const duration = Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY;
+        const nextTime = Math.max(0, Math.min(seconds, duration));
+        lastCommandedTimeRef.current = nextTime;
+        if (video.readyState < 1) {
+            return new Promise((resolve) => {
+                const onLoadedMetadata = () => {
+                    video.removeEventListener('loadedmetadata', onLoadedMetadata);
+                    void commitSeek(video, nextTime).then(resolve);
+                };
+                video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+            });
+        }
+
+        pendingSeekResolveRef.current?.();
+        pendingSeekResolveRef.current = null;
+        if (pendingSeekTimeoutRef.current !== null) {
+            window.clearTimeout(pendingSeekTimeoutRef.current);
+            pendingSeekTimeoutRef.current = null;
+        }
+        pendingSeekRef.current = { seconds: nextTime, until: Date.now() + 1200 };
+        if (import.meta.env.DEV) console.debug('[GraphicsTool] seek requested', { seconds: nextTime });
+
+        return new Promise((resolve) => {
+            pendingSeekResolveRef.current = resolve;
+            pendingSeekTimeoutRef.current = window.setTimeout(() => {
+                settlePendingSeek(video, 'seek-timeout');
+            }, 900);
+            if (Math.abs(video.currentTime - nextTime) <= 0.016) {
+                settlePendingSeek(video, 'seek-already-there');
+                return;
+            }
+            video.currentTime = nextTime;
+            publishVideoState(video, 'seek-command');
+            requestDrawRef.current?.();
+        });
+    };
+
+    useEffect(() => {
+        if (mediaKind !== 'video') {
+            onVideoControllerReady?.(null);
+            return undefined;
+        }
+
+        const controller: VideoPreviewController = {
+            play: async () => {
+                const video = videoRef.current;
+                if (!video) return;
+                const commandedTime = lastCommandedTimeRef.current;
+                if (
+                    commandedTime !== null &&
+                    commandedTime > 0.05 &&
+                    Math.abs(video.currentTime - commandedTime) > 0.05
+                ) {
+                    if (import.meta.env.DEV) console.debug('[GraphicsTool] play after seek', { seconds: commandedTime });
+                    await commitSeek(video, commandedTime);
+                }
+                await safelyPlayVideo(video);
+                publishVideoState(video, 'play-command');
+                requestDrawRef.current?.();
+            },
+            pause: () => {
+                const video = videoRef.current;
+                if (!video) return;
+                video.pause();
+                publishVideoState(video, 'pause-command');
+                requestDrawRef.current?.();
+            },
+            stop: () => {
+                const video = videoRef.current;
+                if (!video) return;
+                pendingSeekRef.current = null;
+                if (pendingSeekTimeoutRef.current !== null) {
+                    window.clearTimeout(pendingSeekTimeoutRef.current);
+                    pendingSeekTimeoutRef.current = null;
+                }
+                pendingSeekResolveRef.current?.();
+                pendingSeekResolveRef.current = null;
+                video.pause();
+                video.currentTime = 0;
+                lastCommandedTimeRef.current = 0;
+                publishVideoState(video, 'stop-command');
+                requestDrawRef.current?.();
+            },
+            seek: async (seconds: number) => {
+                const video = videoRef.current;
+                if (!video) return;
+                await commitSeek(video, seconds);
+            },
+            getState: () => {
+                const video = videoRef.current;
+                return video ? getVideoState(video) : { currentTime: 0, duration: 0, playing: false };
+            },
+        };
+
+        onVideoControllerReady?.(controller);
+        return () => onVideoControllerReady?.(null);
+    }, [media.url, mediaKind, onVideoControllerReady]);
 
     useEffect(() => {
         const video = videoRef.current;
         if (!video || mediaKind !== 'video') return;
 
-        const publish = () => {
-            onPlaybackState?.({
-                currentTime: video.currentTime,
-                duration: Number.isFinite(video.duration) ? video.duration : 0,
-            });
+        let initialFrame = 0;
+        const publishMetadata = () => publishVideoState(video, 'metadata');
+        const publishTime = () => {
+            publishVideoState(video, 'timeupdate');
+            requestDrawRef.current?.();
         };
+        const publishPlay = () => publishVideoState(video, 'play');
+        const publishPause = () => {
+            publishVideoState(video, 'pause');
+            requestDrawRef.current?.();
+        };
+        const publishEnded = () => {
+            publishVideoState(video, 'ended');
+            requestDrawRef.current?.();
+        };
+        const publishSeeked = () => settlePendingSeek(video, 'seeked');
 
-        video.addEventListener('loadedmetadata', publish);
-        video.addEventListener('durationchange', publish);
-        video.addEventListener('timeupdate', publish);
-        video.addEventListener('seeked', publish);
-        video.addEventListener('ended', publish);
-        if (video.readyState >= 1) publish();
+        video.addEventListener('loadedmetadata', publishMetadata);
+        video.addEventListener('durationchange', publishMetadata);
+        video.addEventListener('timeupdate', publishTime);
+        video.addEventListener('seeked', publishSeeked);
+        video.addEventListener('play', publishPlay);
+        video.addEventListener('pause', publishPause);
+        video.addEventListener('ended', publishEnded);
+        if (video.readyState >= 1) {
+            initialFrame = window.requestAnimationFrame(publishMetadata);
+        }
 
         return () => {
-            video.removeEventListener('loadedmetadata', publish);
-            video.removeEventListener('durationchange', publish);
-            video.removeEventListener('timeupdate', publish);
-            video.removeEventListener('seeked', publish);
-            video.removeEventListener('ended', publish);
+            if (initialFrame) window.cancelAnimationFrame(initialFrame);
+            video.removeEventListener('loadedmetadata', publishMetadata);
+            video.removeEventListener('durationchange', publishMetadata);
+            video.removeEventListener('timeupdate', publishTime);
+            video.removeEventListener('seeked', publishSeeked);
+            video.removeEventListener('play', publishPlay);
+            video.removeEventListener('pause', publishPause);
+            video.removeEventListener('ended', publishEnded);
         };
-    }, [media.url, mediaKind, onPlaybackState]);
+    }, [media.url, mediaKind]);
 
     useEffect(() => {
-        const video = videoRef.current;
-        if (!video || mediaKind !== 'video' || !stopRequest) return;
-        if (lastStopRequestIdRef.current === stopRequest.id) return;
-        lastStopRequestIdRef.current = stopRequest.id;
-        video.pause();
-        video.currentTime = 0;
-        window.requestAnimationFrame(() => {
-            onPlaybackState?.({ currentTime: 0, duration: Number.isFinite(video.duration) ? video.duration : 0 });
-        });
-    }, [mediaKind, onPlaybackState, stopRequest]);
-
-    useEffect(() => {
-        const video = videoRef.current;
-        if (!video || mediaKind !== 'video' || !seekRequest) return;
-        if (!Number.isFinite(seekRequest.seconds)) return;
-        const duration = Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY;
-        const nextTime = Math.max(0, Math.min(seekRequest.seconds, duration));
-        video.currentTime = nextTime;
-        window.requestAnimationFrame(() => {
-            onPlaybackState?.({ currentTime: video.currentTime, duration: Number.isFinite(video.duration) ? video.duration : 0 });
-        });
-    }, [mediaKind, onPlaybackState, seekRequest]);
-
-    useEffect(() => {
-        let frameId = 0;
+        let animationFrameId = 0;
+        let videoFrameId = 0;
         let disposed = false;
+        let drawQueued = false;
 
         const draw = () => {
+            drawQueued = false;
             if (disposed) return;
 
             const canvas = canvasRef.current;
             const ctx = canvas?.getContext('2d', { willReadFrequently: true });
             const source = mediaKind === 'video' ? videoRef.current : imageRef.current;
             if (!canvas || !ctx || !source) {
-                frameId = window.requestAnimationFrame(draw);
+                scheduleDraw();
                 return;
             }
 
@@ -1346,7 +1795,7 @@ function CanvasFilteredMedia({
                 : (source as HTMLImageElement).naturalHeight;
 
             if (!naturalWidth || !naturalHeight) {
-                frameId = window.requestAnimationFrame(draw);
+                scheduleDraw();
                 return;
             }
 
@@ -1389,14 +1838,30 @@ function CanvasFilteredMedia({
             }
 
             if (mediaKind === 'video') {
-                frameId = window.requestAnimationFrame(draw);
+                const video = videoRef.current as VideoFrameCallbackVideo | null;
+                if (video && !video.paused && !video.ended) scheduleDraw();
             }
         };
 
-        frameId = window.requestAnimationFrame(draw);
+        const scheduleDraw = () => {
+            if (disposed || drawQueued) return;
+            drawQueued = true;
+            const video = videoRef.current as VideoFrameCallbackVideo | null;
+            if (mediaKind === 'video' && video?.requestVideoFrameCallback && !video.paused && !video.ended) {
+                videoFrameId = video.requestVideoFrameCallback(draw);
+                return;
+            }
+            animationFrameId = window.requestAnimationFrame(draw);
+        };
+
+        requestDrawRef.current = scheduleDraw;
+        scheduleDraw();
         return () => {
             disposed = true;
-            window.cancelAnimationFrame(frameId);
+            requestDrawRef.current = null;
+            if (animationFrameId) window.cancelAnimationFrame(animationFrameId);
+            const video = videoRef.current as VideoFrameCallbackVideo | null;
+            if (videoFrameId && video?.cancelVideoFrameCallback) video.cancelVideoFrameCallback(videoFrameId);
         };
     }, [media.url, mediaKind, preview]);
 
@@ -1552,10 +2017,8 @@ function PortraitCanvas({
     transform,
     overlays,
     assets,
-    playing,
-    stopRequest,
-    seekRequest,
     onPlaybackState,
+    onVideoControllerReady,
     chromaMask,
     onChromaMaskChange,
     previewFilter = '',
@@ -1566,28 +2029,13 @@ function PortraitCanvas({
     transform: PortraitTransform;
     overlays: OverlayState;
     assets: GraphicsAssets | null;
-    playing?: boolean;
-    stopRequest?: StopRequest;
-    seekRequest?: SeekRequest;
-    onPlaybackState?: (state: { currentTime: number; duration: number }) => void;
+    onPlaybackState?: (state: PlaybackState) => void;
+    onVideoControllerReady?: (controller: VideoPreviewController | null) => void;
     chromaMask?: ChromaMaskState;
     onChromaMaskChange?: (mask: ChromaMaskState) => void;
     previewFilter?: string;
     shotcutPreviewFilters?: ShotcutPreviewOptions;
 }) {
-    const videoRef = useRef<HTMLVideoElement | null>(null);
-
-    useEffect(() => {
-        const video = videoRef.current;
-        if (!video) return;
-
-        if (playing) {
-            void video.play();
-        } else {
-            video.pause();
-        }
-    }, [playing, media?.url]);
-
     return (
         <Box
             sx={{
@@ -1617,15 +2065,12 @@ function PortraitCanvas({
                         <CanvasFilteredMedia
                             media={media}
                             mediaKind={mediaKind}
-                            playing={playing}
-                            stopRequest={stopRequest}
-                            seekRequest={seekRequest}
                             onPlaybackState={onPlaybackState}
+                            onVideoControllerReady={onVideoControllerReady}
                             preview={shotcutPreviewFilters}
                         />
                     ) : mediaKind === 'video' ? (
                         <video
-                            ref={videoRef}
                             src={media.url}
                             muted
                             loop
@@ -1776,10 +2221,12 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
     const [overlays, setOverlays] = useState(DEFAULT_OVERLAYS);
     const [preset, setPreset] = useState<PortraitOutputPreset>('high');
     const [playing, setPlaying] = useState(false);
-    const [stopRequest, setStopRequest] = useState<StopRequest | undefined>(undefined);
-    const [seekRequest, setSeekRequest] = useState<SeekRequest | undefined>(undefined);
+    const videoControllerRef = useRef<VideoPreviewController | null>(null);
+    const lastUserSeekRef = useRef<{ seconds: number; until: number } | null>(null);
+    const lastSeekSecondsRef = useRef<number | null>(null);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
+    const [seekStatusText, setSeekStatusText] = useState('');
     const [includeAudio, setIncludeAudio] = useState(true);
     const [interpolation, setInterpolation] = useState<'none' | 'motion'>('none');
     const [colorPreset, setColorPreset] = useState('neutral');
@@ -1794,6 +2241,7 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
     const [operationState, setOperationState] = useState<OperationState>('idle');
     const [operationProgress, setOperationProgress] = useState<number | undefined>(undefined);
     const [operationMessage, setOperationMessage] = useState('');
+    const [dragActive, setDragActive] = useState(false);
 
     useOverlayShortcuts(setOverlays);
 
@@ -1806,6 +2254,9 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
             }
             if (status.missingFrei0rPlugins?.length) {
                 showNotification(`${t('graphics.notification.missingFrei0rPlugins', currentLanguage)} ${status.missingFrei0rPlugins.join(', ')}`, 'warning');
+            }
+            if (status.failedFrei0rPlugins?.length) {
+                showNotification(`${t('graphics.notification.failedFrei0rPlugins', currentLanguage)} ${status.failedFrei0rPlugins.join(', ')}`, 'warning');
             }
         });
     }, [currentLanguage, showNotification]);
@@ -1845,7 +2296,7 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
     const selectedColorPreset = colorPresets.find((item) => item.id === colorPreset) || colorPresets[0];
     const previewSaturation = shotcutFilters.saturation.enabled ? shotcutFilters.saturation.level : 100;
     const previewContrast = shotcutFilters.contrast.enabled ? shotcutFilters.contrast.level : 50;
-    const previewFilter = `${buildPreviewFilter(selectedColorPreset, previewSaturation, 100, previewContrast)} ${buildColorGradingFilter(shotcutFilters)}`.trim();
+    const previewFilter = buildPreviewFilter(selectedColorPreset, previewSaturation, 100, previewContrast);
     const [chromaMask, setChromaMask] = useState<ChromaMaskState>(DEFAULT_CHROMA_MASK);
     const shotcutPreviewFilters = buildCanvasPreviewOptions(previewFilter, shotcutFilters, chromaMask.enabled && chromaMask.dirty ? chromaMask.dataUrl : undefined);
     const toggleExpandedFilter = (id: string) => setExpandedFilters((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -1862,20 +2313,62 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
         if (filter.engine !== 'frei0r') return false;
         if (!ffmpegStatus?.ok) return true;
         if (!ffmpegStatus.supportsFrei0r) return true;
-        return Boolean(filter.pluginFile && ffmpegStatus.missingFrei0rPlugins?.includes(filter.pluginFile));
+        return Boolean(
+            filter.pluginFile &&
+                (ffmpegStatus.missingFrei0rPlugins?.includes(filter.pluginFile) || ffmpegStatus.failedFrei0rPlugins?.includes(filter.pluginFile))
+        );
+    };
+
+    const resetVideoPreviewState = () => {
+        setPlaying(false);
+        videoControllerRef.current = null;
+        lastUserSeekRef.current = null;
+        lastSeekSecondsRef.current = null;
+        setSeekStatusText('');
+        setCurrentTime(0);
+        setDuration(0);
+    };
+
+    const loadVideoSource = (selected: GraphicsFile, notify = true) => {
+        setSource(selected);
+        resetVideoPreviewState();
+        if (notify) showNotification(`${t('graphics.notification.videoLoaded', currentLanguage)} ${selected.name}`, 'success');
+    };
+
+    const handleVideoControllerReady = useCallback((controller: VideoPreviewController | null) => {
+        videoControllerRef.current = controller;
+        if (controller) {
+            const state = controller.getState();
+            setCurrentTime(state.currentTime);
+            setDuration(state.duration);
+            setPlaying(state.playing);
+        }
+    }, []);
+
+    const resolveDroppedVideo = async (event: DragEvent<HTMLElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setDragActive(false);
+
+        const file = event.dataTransfer.files.item(0);
+        if (!file) {
+            showNotification(t('graphics.notification.dropEmpty', currentLanguage), 'warning');
+            return;
+        }
+
+        try {
+            const selected = (await window.electronAPI.resolveDroppedGraphicsFile(file, 'video')) as GraphicsFile;
+            loadVideoSource(selected);
+        } catch (error) {
+            showNotification(getErrorMessage(error, t('graphics.notification.videoDropFailed', currentLanguage)), 'error');
+        }
     };
 
     const handleLoad = async () => {
         try {
             const selected = (await window.electronAPI.selectGraphicsVideo()) as GraphicsFile | null;
             if (!selected) return;
-            setSource(selected);
-            setPlaying(false);
-            setStopRequest({ id: Date.now() });
-            setSeekRequest(undefined);
-            setCurrentTime(0);
-            setDuration(0);
-            showNotification(`${t('graphics.notification.videoLoaded', currentLanguage)} ${selected.name}`, 'success');
+            loadVideoSource(selected);
         } catch (error) {
             showNotification(getErrorMessage(error, t('graphics.notification.videoLoadFailed', currentLanguage)), 'error');
         }
@@ -1901,12 +2394,7 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
                 operationId: nextOperationId,
             });
             if (result) {
-                setSource(result as GraphicsFile);
-                setPlaying(false);
-                setStopRequest({ id: Date.now() });
-                setSeekRequest(undefined);
-                setCurrentTime(0);
-                setDuration(0);
+                loadVideoSource(result as GraphicsFile, false);
                 showNotification(t('graphics.notification.loopExported', currentLanguage), 'success');
                 if (includeAudio && result.audioIncluded === false) {
                     showNotification(t('graphics.notification.loopAudioFallback', currentLanguage), 'warning');
@@ -1924,16 +2412,70 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
     };
 
     const handleStop = () => {
+        videoControllerRef.current?.stop();
         setPlaying(false);
+        lastUserSeekRef.current = null;
+        lastSeekSecondsRef.current = null;
+        setSeekStatusText('');
         setCurrentTime(0);
-        setSeekRequest({ id: Date.now(), seconds: 0 });
-        setStopRequest({ id: Date.now() });
     };
 
     const handleSeek = (value: number) => {
-        setCurrentTime(value);
-        setSeekRequest({ id: Date.now() + Math.random(), seconds: value });
+        if (!source || duration <= 0) return;
+        const nextSeconds = Math.max(0, Math.min(value, duration));
+        lastUserSeekRef.current = { seconds: nextSeconds, until: Date.now() + 1200 };
+        lastSeekSecondsRef.current = nextSeconds;
+        setSeekStatusText(`Seeking ${formatTimelineTime(nextSeconds)}`);
+        window.setTimeout(() => {
+            if (lastUserSeekRef.current && Date.now() >= lastUserSeekRef.current.until) {
+                lastUserSeekRef.current = null;
+                setSeekStatusText('');
+            }
+        }, 1200);
+        setCurrentTime(nextSeconds);
+        void videoControllerRef.current?.seek(nextSeconds).then(() => {
+            if (lastSeekSecondsRef.current === nextSeconds) {
+                lastUserSeekRef.current = null;
+                setSeekStatusText('');
+            }
+        });
     };
+
+    const handlePlay = async () => {
+        const lastSeekSeconds = lastSeekSecondsRef.current;
+        const controller = videoControllerRef.current;
+        setPlaying(true);
+        if (lastSeekSeconds !== null && duration > 0) {
+            const nextSeconds = Math.max(0, Math.min(lastSeekSeconds, duration));
+            const controllerState = controller?.getState();
+            if (!controllerState || Math.abs(controllerState.currentTime - nextSeconds) > 0.05) {
+                await controller?.seek(nextSeconds);
+                setCurrentTime(nextSeconds);
+            }
+        }
+        await controller?.play();
+    };
+
+    const handlePause = () => {
+        videoControllerRef.current?.pause();
+        setPlaying(false);
+    };
+
+    const handlePlaybackState = useCallback((state: PlaybackState) => {
+        const guard = lastUserSeekRef.current;
+        if (guard && Date.now() < guard.until) {
+            if (state.currentTime <= 0.05 && guard.seconds > 0.05) {
+                return;
+            }
+            if (Math.abs(state.currentTime - guard.seconds) <= 0.75 || state.currentTime > 0.05) {
+                lastUserSeekRef.current = null;
+                setSeekStatusText('');
+            }
+        }
+        setCurrentTime(state.currentTime);
+        setDuration(state.duration);
+        setPlaying(state.playing);
+    }, []);
 
     const clearChromaMask = () => setChromaMask(DEFAULT_CHROMA_MASK);
 
@@ -1989,7 +2531,25 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
     return (
         <Box sx={twoColumnSx}>
             <Box>
-                <Paper sx={{ ...panelSx, p: 2 }}>
+                <Paper
+                    onDragOver={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setDragActive(true);
+                    }}
+                    onDragLeave={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false);
+                    }}
+                    onDrop={resolveDroppedVideo}
+                    sx={{
+                        ...panelSx,
+                        p: 2,
+                        borderColor: dragActive ? 'var(--primary-color)' : 'var(--border-color)',
+                        background: dragActive ? 'color-mix(in srgb, var(--primary-color) 14%, var(--sidebar-bg-color))' : panelSx.background,
+                    }}
+                >
                     <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 1.5 }}>
                         <Stack direction="row" spacing={1}>
                             <Button variant="outlined" startIcon={<FileOpenIcon />} sx={outlinedButtonSx} onClick={handleLoad}>
@@ -2005,13 +2565,8 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
                         transform={transform}
                         overlays={overlays}
                         assets={assets}
-                        playing={playing}
-                        stopRequest={stopRequest}
-                        seekRequest={seekRequest}
-                        onPlaybackState={(state) => {
-                            setCurrentTime(state.currentTime);
-                            setDuration(state.duration);
-                        }}
+                        onPlaybackState={handlePlaybackState}
+                        onVideoControllerReady={handleVideoControllerReady}
                         chromaMask={chromaMask}
                         onChromaMaskChange={(nextMask) => {
                             setChromaMask(nextMask);
@@ -2028,9 +2583,10 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
                         disabled={!source}
                         playing={playing}
                         busy={busy}
+                        seekStatusText={seekStatusText}
                         onSeek={handleSeek}
-                        onPlay={() => setPlaying(true)}
-                        onPause={() => setPlaying(false)}
+                        onPlay={handlePlay}
+                        onPause={handlePause}
                         onStop={handleStop}
                         onMakeLoop={() => setLoopDialogOpen(true)}
                         onExport={handleExport}
@@ -2167,28 +2723,11 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
                                             <ControlSlider label={t('graphics.filters.level', currentLanguage)} value={shotcutFilters.contrast.level} min={0} max={100} onChange={(level) => updateShotcutFilter('contrast', { level })} />
                                         )}
                                         {filter.id === 'colorGrading' && (
-                                            <Stack spacing={1}>
-                                                {(['lift', 'gamma', 'gain'] as const).map((group) => (
-                                                    <Box key={group}>
-                                                        <Typography sx={{ fontSize: 13, fontWeight: 700, mt: 1 }}>{t(`graphics.filters.${group}` as any, currentLanguage)}</Typography>
-                                                        {(['r', 'g', 'b'] as const).map((channel) => (
-                                                            <ControlSlider
-                                                                key={`${group}-${channel}`}
-                                                                label={channel.toUpperCase()}
-                                                                value={shotcutFilters.colorGrading[group][channel]}
-                                                                min={-100}
-                                                                max={100}
-                                                                onChange={(value) => updateShotcutFilter('colorGrading', {
-                                                                    [group]: { ...shotcutFilters.colorGrading[group], [channel]: value },
-                                                                } as Partial<ShotcutVideoFilters['colorGrading']>)}
-                                                            />
-                                                        ))}
-                                                    </Box>
-                                                ))}
-                                                <Button size="small" variant="outlined" sx={outlinedButtonSx} onClick={() => updateShotcutFilter('colorGrading', DEFAULT_SHOTCUT_FILTERS.colorGrading)}>
-                                                    {t('graphics.filters.resetPreset', currentLanguage)}
-                                                </Button>
-                                            </Stack>
+                                            <ColorGradingControl
+                                                value={shotcutFilters.colorGrading}
+                                                language={currentLanguage}
+                                                onChange={(colorGrading) => updateShotcutFilter('colorGrading', colorGrading)}
+                                            />
                                         )}
                                     </ShotcutFilterRow>
                                 );
@@ -2241,15 +2780,39 @@ function ImageTool({ assets }: { assets: GraphicsAssets | null }) {
     const [busy, setBusy] = useState(false);
     const [operationState, setOperationState] = useState<OperationState>('idle');
     const [operationMessage, setOperationMessage] = useState('');
+    const [dragActive, setDragActive] = useState(false);
 
     useOverlayShortcuts(setOverlays);
+
+    const loadImageSource = (selected: GraphicsFile) => {
+        setSource(selected);
+        showNotification(`${t('graphics.notification.imageLoaded', currentLanguage)} ${selected.name}`, 'success');
+    };
+
+    const resolveDroppedImage = async (event: DragEvent<HTMLElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setDragActive(false);
+
+        const file = event.dataTransfer.files.item(0);
+        if (!file) {
+            showNotification(t('graphics.notification.dropEmpty', currentLanguage), 'warning');
+            return;
+        }
+
+        try {
+            const selected = (await window.electronAPI.resolveDroppedGraphicsFile(file, 'image')) as GraphicsFile;
+            loadImageSource(selected);
+        } catch (error) {
+            showNotification(getErrorMessage(error, t('graphics.notification.imageDropFailed', currentLanguage)), 'error');
+        }
+    };
 
     const handleLoad = async () => {
         try {
             const selected = (await window.electronAPI.selectGraphicsImage()) as GraphicsFile | null;
             if (!selected) return;
-            setSource(selected);
-            showNotification(`${t('graphics.notification.imageLoaded', currentLanguage)} ${selected.name}`, 'success');
+            loadImageSource(selected);
         } catch (error) {
             showNotification(getErrorMessage(error, t('graphics.notification.imageLoadFailed', currentLanguage)), 'error');
         }
@@ -2342,7 +2905,25 @@ function ImageTool({ assets }: { assets: GraphicsAssets | null }) {
     return (
         <Box sx={twoColumnSx}>
             <Box>
-                <Paper sx={{ ...panelSx, p: 2 }}>
+                <Paper
+                    onDragOver={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setDragActive(true);
+                    }}
+                    onDragLeave={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false);
+                    }}
+                    onDrop={resolveDroppedImage}
+                    sx={{
+                        ...panelSx,
+                        p: 2,
+                        borderColor: dragActive ? 'var(--primary-color)' : 'var(--border-color)',
+                        background: dragActive ? 'color-mix(in srgb, var(--primary-color) 14%, var(--sidebar-bg-color))' : panelSx.background,
+                    }}
+                >
                     <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 1.5 }}>
                         <Button variant="outlined" startIcon={<FileOpenIcon />} sx={outlinedButtonSx} onClick={handleLoad}>
                             {t('graphics.image.load', currentLanguage)}

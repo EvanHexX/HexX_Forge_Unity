@@ -13,6 +13,19 @@ const DISABLED_MODS_DIR = getStoragePath('disabled_mods');
 const PACKAGES_DIR = getStoragePath('packages');
 const MOD_LIST_PATH = getConfigPath('mod_list.json');
 
+function stripJsonBom(text: string): string {
+    return text.replace(/^[\uFEFF\u200B\u200C\u200D\u2060]+/, '');
+}
+
+function parseJsonText<T>(text: string, fallback?: T): T {
+    try {
+        return JSON.parse(stripJsonBom(text)) as T;
+    } catch (err) {
+        if (arguments.length >= 2) return fallback as T;
+        throw err;
+    }
+}
+
 // ── Types ──────────────────────────────────────────────────────────
 
 export type ModFileType = 'dll' | 'asset' | 'mod-info' | 'script' | 'config' | 'folder';
@@ -25,6 +38,11 @@ export type ModFileInfo = {
     dependsOn?: string;
 };
 
+export type PackageDependency = {
+    target: string;
+    displayName?: string;
+};
+
 export type PackageMeta = {
     id: string;
     name: string;
@@ -33,6 +51,8 @@ export type PackageMeta = {
     packageType: 'collection' | 'single';
     dllPaths: string[];
     files: ModFileInfo[];
+    enabled?: boolean;
+    dependency?: PackageDependency;
     version?: string;
     source?: ModPackageSource;
 };
@@ -53,6 +73,9 @@ export type ModPackage = {
     enabled: boolean | 'mixed';
     dlls: DllEntry[];
     hasSettings: boolean;
+    dependency?: PackageDependency;
+    dependencyState?: 'ok' | 'missing' | 'disabled';
+    dependencyParentId?: string;
     version?: string;
     source?: ModPackageSource;
 };
@@ -123,6 +146,15 @@ export type ScriptFeature = {
     jsonPath?: string;
     linkedConfigPath?: string;
     linkedConfigArrayPath?: string;
+    linkedConfigValueKey?: string;
+    linkedConfigTargetPath?: string;
+    linkedConfigPathSegments?: string[];
+    linkedConfigKeyTemplate?: string;
+    linkedConfigFilterKey?: string;
+    linkedConfigFilterValue?: string;
+    linkedConfigAssetPath?: string;
+    linkedConfigSelectedFields?: string[];
+    linkedConfigFieldDefaults?: Record<string, unknown>;
     sample?: unknown;
     fields?: ScriptField[];
 };
@@ -137,7 +169,7 @@ export type ManagedFileGroup = {
 export type ApplyPackageSettingsChanges = {
     cfgValues: Record<string, string>;
     jsonValues: Record<string, string | number | boolean>;
-    fileImports: Array<{ featureId: string; sourcePath: string }>;
+    fileImports: Array<{ featureId: string; sourcePath: string; metadata?: Record<string, unknown> }>;
     fileDeletes: Array<{ featureId: string; fileName: string }>;
     configText?: { path: string; content: string } | null;
 };
@@ -165,6 +197,8 @@ export type ZipInspectResult = {
         author: string;
         description: string;
         packageType: 'collection' | 'single';
+        version?: string;
+        dependency?: PackageDependency;
     } | null;
     entries: ZipEntryInfo[];
     warnings: string[];
@@ -192,6 +226,8 @@ type HexXModInfoFile = {
     author?: string;
     description?: string;
     packageType?: 'collection' | 'single';
+    version?: string;
+    dependency?: PackageDependency;
     files?: Array<{
         path: string;
         name?: string;
@@ -216,6 +252,13 @@ type PackModSource = {
         author?: string;
         dependsOn?: string;
     }>;
+};
+
+type DependencyResolution = {
+    parent?: PackageMeta;
+    parentName?: string;
+    parentId?: string;
+    state?: 'ok' | 'missing' | 'disabled';
 };
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -299,6 +342,91 @@ function saveModListFile(data: ModListFile): void {
     writeJsonFile(MOD_LIST_PATH, data);
 }
 
+function getPackageIdentityKeys(pkg: PackageMeta): string[] {
+    return [
+        pkg.source?.catalogId,
+        pkg.id,
+        pkg.name,
+    ]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map((value) => value.trim().toLowerCase());
+}
+
+function getStandaloneIdentityKeys(relativePath: string, meta: ModMeta = {}): string[] {
+    return [
+        meta.source?.catalogId,
+        normalizeRelativePath(relativePath),
+        toEnabledDllRelativePath(relativePath),
+        toLegacyDllRelativePath(relativePath),
+        path.basename(relativePath),
+        meta.name,
+    ]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map((value) => value.trim().toLowerCase());
+}
+
+function getPackageEnabledFromMeta(pkg: PackageMeta, dlls: DllEntry[] = []): boolean | 'mixed' {
+    if ((pkg.dllPaths ?? []).length === 0) return Boolean(pkg.enabled);
+    const enabledCount = dlls.filter((d) => d.enabled).length;
+    if (enabledCount === 0) return false;
+    return enabledCount === dlls.length ? true : 'mixed';
+}
+
+function isPackageActive(pkg: PackageMeta, dlls: DllEntry[] = []): boolean {
+    return getPackageEnabledFromMeta(pkg, dlls) === true;
+}
+
+function resolvePackageDependency(
+    modListFile: ModListFile,
+    pkg: PackageMeta,
+    packageDllsMap: Map<string, DllEntry[]> = new Map()
+): DependencyResolution {
+    const target = pkg.dependency?.target?.trim();
+    if (!target) return {};
+    const targetKey = target.toLowerCase();
+    for (const [candidateId, candidate] of Object.entries(modListFile.packages)) {
+        if (candidateId === pkg.id) continue;
+        if (!getPackageIdentityKeys(candidate).includes(targetKey)) continue;
+        const parentActive = isPackageActive(candidate, packageDllsMap.get(candidateId) ?? []);
+        return {
+            parent: candidate,
+            parentId: candidateId,
+            state: parentActive ? 'ok' : 'disabled',
+        };
+    }
+    for (const [relativePath, meta] of Object.entries(modListFile.mods)) {
+        if (meta.packageId) continue;
+        if (!getStandaloneIdentityKeys(relativePath, meta).includes(targetKey)) continue;
+        const active = getActiveDllPathCandidates(relativePath).some((candidate) => fs.existsSync(candidate));
+        return {
+            parentName: meta.name || path.basename(relativePath),
+            parentId: relativePath,
+            state: active ? 'ok' : 'disabled',
+        };
+    }
+    return { state: 'missing' };
+}
+
+function getActiveDependentPackagesByKeys(
+    modListFile: ModListFile,
+    parentKeys: string[],
+    packageDllsMap: Map<string, DllEntry[]> = new Map()
+): PackageMeta[] {
+    return Object.values(modListFile.packages).filter((candidate) => {
+        const target = candidate.dependency?.target?.trim().toLowerCase();
+        if (!target || !parentKeys.includes(target)) return false;
+        return isPackageActive(candidate, packageDllsMap.get(candidate.id) ?? []);
+    });
+}
+
+function getActiveDependentPackages(
+    modListFile: ModListFile,
+    parentPkg: PackageMeta,
+    packageDllsMap: Map<string, DllEntry[]> = new Map()
+): PackageMeta[] {
+    return getActiveDependentPackagesByKeys(modListFile, getPackageIdentityKeys(parentPkg), packageDllsMap);
+}
+
 function listDllsRecursive(
     rootDir: string
 ): Array<{ fileName: string; relativePath: string; fullPath: string }> {
@@ -325,6 +453,38 @@ function listDllsRecursive(
 
     walk(rootDir);
     return results;
+}
+
+function buildPackageDllsMap(modListFile: ModListFile): Map<string, DllEntry[]> {
+    const pluginsDir = getPluginsDir();
+    const enabledDlls = listDllsRecursive(pluginsDir).map((item) => ({
+        ...item,
+        relativePath: toEnabledDllRelativePath(item.relativePath),
+        enabled: true,
+    }));
+    const disabledDlls = listDllsRecursive(DISABLED_MODS_DIR).map((item) => ({ ...item, enabled: false }));
+    const packageDllsMap = new Map<string, DllEntry[]>();
+
+    for (const dll of [...enabledDlls, ...disabledDlls]) {
+        const legacyPath = toLegacyDllRelativePath(dll.relativePath);
+        const enabledPath = toEnabledDllRelativePath(dll.relativePath);
+        const meta =
+            modListFile.mods[dll.relativePath] ??
+            modListFile.mods[enabledPath] ??
+            modListFile.mods[legacyPath] ??
+            modListFile.mods[dll.fileName] ??
+            {};
+        if (!meta.packageId || !modListFile.packages[meta.packageId]) continue;
+        if (!packageDllsMap.has(meta.packageId)) packageDllsMap.set(meta.packageId, []);
+        packageDllsMap.get(meta.packageId)!.push({
+            relativePath: dll.relativePath,
+            displayName: meta.name || dll.fileName,
+            author: meta.author || '',
+            enabled: dll.enabled,
+        });
+    }
+
+    return packageDllsMap;
 }
 
 function ensureParentDir(filePath: string): void {
@@ -379,7 +539,7 @@ function suggestFileType(entryName: string, isDirectory: boolean): ModFileType {
     if (lower.endsWith('.dll')) return 'dll';
     if (lower.endsWith('.cfg')) return 'config';
     if (/\.(png|jpg|jpeg|gif|webp|webm|bmp|tga|tiff)$/.test(lower)) return 'asset';
-    if (lower.endsWith('.json')) return 'mod-info';
+    if (lower.endsWith('.json')) return 'config';
     return 'asset';
 }
 
@@ -465,13 +625,12 @@ export function scanMods(): ModPackage[] {
 
     const packages: ModPackage[] = [];
 
-    for (const [pkgId, dlls] of packageDllsMap.entries()) {
-        const pkgMeta = modListFile.packages[pkgId];
-        const enabledCount = dlls.filter((d) => d.enabled).length;
-        const enabled: boolean | 'mixed' =
-            enabledCount === 0 ? false : enabledCount === dlls.length ? true : 'mixed';
+    for (const [pkgId, pkgMeta] of Object.entries(modListFile.packages)) {
+        const dlls = packageDllsMap.get(pkgId) ?? [];
+        const enabled = getPackageEnabledFromMeta(pkgMeta, dlls);
 
         const hasSettings = pkgMeta.files.some((f) => f.type === 'script' || f.type === 'config');
+        const dependency = resolvePackageDependency(modListFile, pkgMeta, packageDllsMap);
 
         packages.push({
             id: pkgId,
@@ -482,6 +641,9 @@ export function scanMods(): ModPackage[] {
             enabled,
             dlls: dlls.sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
             hasSettings,
+            dependency: pkgMeta.dependency,
+            dependencyState: dependency.state,
+            dependencyParentId: dependency.parentId,
             version: pkgMeta.version,
             source: pkgMeta.source,
         });
@@ -499,8 +661,42 @@ export function setPackageEnabled(packageId: string, enabled: boolean): { packag
     if (!bepInExDir) throw new Error('게임 경로가 설정되지 않았습니다.');
 
     const modListFile = readModListFile();
-    const dllPaths: string[] = modListFile.packages[packageId]?.dllPaths ?? [packageId];
+    const pkgMeta = modListFile.packages[packageId];
+    const packageDllsMap = buildPackageDllsMap(modListFile);
+    const dllPaths: string[] = pkgMeta?.dllPaths ?? [packageId];
     const warnings: string[] = [];
+
+    if (enabled && pkgMeta?.dependency?.target) {
+        const dependency = resolvePackageDependency(modListFile, pkgMeta, packageDllsMap);
+        if (dependency.state === 'missing') {
+            throw new Error(`메인 모드를 찾을 수 없습니다: ${pkgMeta.dependency.displayName || pkgMeta.dependency.target}`);
+        }
+        if (dependency.state === 'disabled') {
+            throw new Error(`메인 모드가 비활성 상태입니다: ${dependency.parent?.name || dependency.parentName || pkgMeta.dependency.displayName || pkgMeta.dependency.target}`);
+        }
+    }
+
+    if (!enabled && pkgMeta) {
+        const dependents = getActiveDependentPackages(modListFile, pkgMeta, packageDllsMap);
+        if (dependents.length > 0) {
+            throw new Error(`활성화된 종속 모드가 있습니다. 먼저 비활성화하거나 삭제해 주세요: ${dependents.map((item) => item.name).join(', ')}`);
+        }
+    }
+    if (!enabled && !pkgMeta) {
+        const meta =
+            modListFile.mods[packageId] ??
+            modListFile.mods[toEnabledDllRelativePath(packageId)] ??
+            modListFile.mods[toLegacyDllRelativePath(packageId)] ??
+            {};
+        const dependents = getActiveDependentPackagesByKeys(
+            modListFile,
+            getStandaloneIdentityKeys(packageId, meta),
+            packageDllsMap
+        );
+        if (dependents.length > 0) {
+            throw new Error(`활성화된 종속 모드가 있습니다. 먼저 비활성화하거나 삭제해 주세요: ${dependents.map((item) => item.name).join(', ')}`);
+        }
+    }
 
     for (const relativePath of dllPaths) {
         const fromCandidates = enabled
@@ -522,16 +718,20 @@ export function setPackageEnabled(packageId: string, enabled: boolean): { packag
     }
 
     // Deploy config/asset files when enabling
-    if (enabled && modListFile.packages[packageId]) {
-        const pkgMeta = modListFile.packages[packageId];
+    if (enabled && pkgMeta) {
         const pkgDir = path.join(PACKAGES_DIR, packageId);
         deployPackageFiles(pkgMeta, pkgDir);
     }
-    if (!enabled && modListFile.packages[packageId]) {
-        const folderPaths = modListFile.packages[packageId].files
+    if (!enabled && pkgMeta) {
+        const folderPaths = pkgMeta.files
             .filter((file) => file.type === 'folder')
             .map((file) => file.path);
         if (folderPaths.length > 0) tryDeleteFolders(folderPaths, bepInExDir);
+    }
+
+    if (pkgMeta && (pkgMeta.dllPaths ?? []).length === 0) {
+        pkgMeta.enabled = enabled;
+        saveModListFile(modListFile);
     }
 
     return { packages: scanMods(), warnings };
@@ -580,6 +780,10 @@ export function deletePackage(packageId: string): ModPackage[] {
 
     if (modListFile.packages[packageId]) {
         const pkg = modListFile.packages[packageId];
+        const dependents = getActiveDependentPackages(modListFile, pkg, buildPackageDllsMap(modListFile));
+        if (dependents.length > 0) {
+            throw new Error(`활성화된 종속 모드가 있습니다. 먼저 비활성화하거나 삭제해 주세요: ${dependents.map((item) => item.name).join(', ')}`);
+        }
         dllPaths = pkg.dllPaths;
         folderPaths = pkg.files.filter((f) => f.type === 'folder').map((f) => f.path);
 
@@ -594,6 +798,19 @@ export function deletePackage(packageId: string): ModPackage[] {
         delete modListFile.packages[packageId];
     } else {
         dllPaths = [packageId];
+        const meta =
+            modListFile.mods[packageId] ??
+            modListFile.mods[toEnabledDllRelativePath(packageId)] ??
+            modListFile.mods[toLegacyDllRelativePath(packageId)] ??
+            {};
+        const dependents = getActiveDependentPackagesByKeys(
+            modListFile,
+            getStandaloneIdentityKeys(packageId, meta),
+            buildPackageDllsMap(modListFile)
+        );
+        if (dependents.length > 0) {
+            throw new Error(`활성화된 종속 모드가 있습니다. 먼저 비활성화하거나 삭제해 주세요: ${dependents.map((item) => item.name).join(', ')}`);
+        }
         if (modListFile.mods[packageId]) {
             delete modListFile.mods[packageId];
         }
@@ -648,7 +865,7 @@ export function deleteMod(relativePath: string): ModPackage[] {
 
 // ── Import ─────────────────────────────────────────────────────────
 
-export function importDllMod(filePath: string, name: string, author: string): ModPackage[] {
+export function importDllMod(filePath: string, name: string, author: string, version?: string): ModPackage[] {
     ensureDirs();
 
     const fileName = path.basename(filePath);
@@ -675,7 +892,7 @@ export function importDllMod(filePath: string, name: string, author: string): Mo
     }
     // 이미 plugins 또는 disabled_mods에 있으면 파일은 그대로 두고 메타만 등록
 
-    modListFile.mods[relativePath] = { name: name || fileName, author: author || '' };
+    modListFile.mods[relativePath] = { name: name || fileName, author: author || '', version: version || undefined };
     saveModListFile(modListFile);
 
     return scanMods();
@@ -700,7 +917,7 @@ function resolveNestedModInfo(
             if (!nestedEntry) continue;
 
             try {
-                const nested = JSON.parse(nestedEntry.getData().toString('utf-8')) as HexXModInfoFile;
+                const nested = parseJsonText<HexXModInfoFile>(nestedEntry.getData().toString('utf-8'));
                 if (nested.packageType === 'collection') continue; // 중첩 collection 금지
 
                 const nestedFiles = resolveNestedModInfo(zip, nested, visited);
@@ -727,7 +944,7 @@ export function importZipMod(filePath: string, metadata: ImportPackageMetadata =
 
     let info: HexXModInfoFile = {};
     if (infoEntry) {
-        info = JSON.parse(infoEntry.getData().toString('utf-8')) as HexXModInfoFile;
+        info = parseJsonText<HexXModInfoFile>(infoEntry.getData().toString('utf-8'));
         // 중첩 mod-info 처리
         info = { ...info, files: resolveNestedModInfo(zip, info) };
     }
@@ -736,7 +953,7 @@ export function importZipMod(filePath: string, metadata: ImportPackageMetadata =
         (entry) => !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.dll')
     );
 
-    if (dllEntries.length === 0) {
+    if (dllEntries.length === 0 && !infoEntry) {
         throw new Error('ZIP 안에 DLL 파일이 없습니다.');
     }
 
@@ -770,7 +987,7 @@ export function importZipMod(filePath: string, metadata: ImportPackageMetadata =
             author: fileMeta?.author || info.author || '',
             description: fileMeta?.description || info.description || '',
             packageId,
-            version: metadata.version,
+            version: metadata.version || info.version,
             source: metadata.source,
         };
     }
@@ -809,7 +1026,9 @@ export function importZipMod(filePath: string, metadata: ImportPackageMetadata =
         packageType: info.packageType || (dllPaths.length > 1 ? 'collection' : 'single'),
         dllPaths,
         files: infoFiles,
-        version: metadata.version,
+        enabled: false,
+        dependency: info.dependency,
+        version: metadata.version || info.version,
         source: metadata.source,
     };
 
@@ -827,6 +1046,8 @@ export function importZipWithConfig(
         author: string;
         description: string;
         packageType: 'collection' | 'single';
+        version?: string;
+        dependency?: PackageDependency;
         files: Array<{
             entryName: string;
             type: ModFileType;
@@ -853,7 +1074,7 @@ export function importZipWithConfig(
         if (!zipEntry) continue;
 
         try {
-            const nested = JSON.parse(zipEntry.getData().toString('utf-8')) as HexXModInfoFile;
+            const nested = parseJsonText<HexXModInfoFile>(zipEntry.getData().toString('utf-8'));
             if (nested.packageType === 'collection') continue;
 
             for (const nf of nested.files ?? []) {
@@ -924,6 +1145,9 @@ export function importZipWithConfig(
             author: f.author,
             dependsOn: f.dependsOn,
         })),
+        enabled: false,
+        dependency: config.dependency,
+        version: config.version,
     };
 
     modListFile.packages[packageId] = pkgMeta;
@@ -938,13 +1162,15 @@ export function createAndImportPackage(data: {
     author: string;
     description: string;
     packageType: 'collection' | 'single';
+    version?: string;
+    dependency?: PackageDependency;
     files: Array<{ filePath: string; name: string; author: string }>;
 }): ModPackage[] {
     ensureDirs();
 
     if (data.packageType === 'single' && data.files.length === 1) {
         const f = data.files[0];
-        return importDllMod(f.filePath, data.name || f.name, data.author || f.author);
+        return importDllMod(f.filePath, data.name || f.name, data.author || f.author, data.version);
     }
 
     const zip = new AdmZip();
@@ -984,6 +1210,8 @@ export function createAndImportPackage(data: {
         author: data.author,
         description: data.description,
         packageType: data.packageType,
+        version: data.version,
+        dependency: data.dependency,
         files: infoFiles,
     };
     zip.addFile('mod-info.json', Buffer.from(JSON.stringify(modInfo, null, 2)));
@@ -1033,6 +1261,8 @@ function packModFromSources(data: {
     author: string;
     description: string;
     packageType: 'collection' | 'single';
+    version?: string;
+    dependency?: PackageDependency;
     sources: PackModSource[];
     settingsScript?: ScriptConfig | null;
     savePath: string;
@@ -1096,6 +1326,7 @@ function packModFromSources(data: {
                 author: source.author || data.author,
                 description: source.description || '',
                 packageType: 'single',
+                version: data.version,
                 files: sourceInfoFiles,
             };
             const nestedName = addUniqueZipFile(
@@ -1118,6 +1349,8 @@ function packModFromSources(data: {
         author: data.author,
         description: data.description,
         packageType: data.packageType,
+        version: data.version,
+        dependency: data.dependency,
         files: topInfoFiles,
     };
     if (data.settingsScript) {
@@ -1146,6 +1379,8 @@ export function packMod(data: {
     author: string;
     description: string;
     packageType: 'collection' | 'single';
+    version?: string;
+    dependency?: PackageDependency;
     files: Array<{ filePath: string; name: string; author: string }>;
     sources?: PackModSource[];
     settingsScript?: ScriptConfig | null;
@@ -1159,6 +1394,8 @@ export function packMod(data: {
             author: data.author,
             description: data.description,
             packageType: data.packageType,
+            version: data.version,
+            dependency: data.dependency,
             sources: data.sources,
             settingsScript: data.settingsScript,
             savePath: data.savePath,
@@ -1213,6 +1450,8 @@ export function packMod(data: {
         author: data.author,
         description: data.description,
         packageType: data.packageType,
+        version: data.version,
+        dependency: data.dependency,
         files: infoFiles,
     };
     if (data.settingsScript) {
@@ -1254,12 +1493,14 @@ export function inspectZip(zipPath: string): ZipInspectResult {
 
     if (infoEntry) {
         try {
-            parsedInfo = JSON.parse(infoEntry.getData().toString('utf-8')) as HexXModInfoFile;
+            parsedInfo = parseJsonText<HexXModInfoFile>(infoEntry.getData().toString('utf-8'));
             modInfo = {
                 name: parsedInfo.name || '',
                 author: parsedInfo.author || '',
                 description: parsedInfo.description || '',
                 packageType: parsedInfo.packageType || 'single',
+                version: parsedInfo.version,
+                dependency: parsedInfo.dependency,
             };
         } catch {
             warnings.push('mod-info.json 파싱 실패 — 손상된 파일일 수 있습니다.');
@@ -1307,6 +1548,17 @@ export function inspectZip(zipPath: string): ZipInspectResult {
                 ? { name: modInfoFile.name, author: modInfoFile.author, type: modInfoFile.type, dependsOn: modInfoFile.dependsOn }
                 : undefined,
             mismatch,
+        });
+    }
+
+    if (!infoEntry && !resultEntries.some((entry) => isGeneratedModInfoCandidate(entry.entryName))) {
+        resultEntries.push({
+            entryName: 'mod-info.json',
+            isDirectory: false,
+            size: 0,
+            suggestedType: 'mod-info',
+            fromModInfo: false,
+            mismatch: 'missing_in_zip',
         });
     }
 
@@ -1402,7 +1654,7 @@ function readManagedManifest(packageId: string): ManagedFileGroup[] {
     const manifestPath = managedManifestPath(packageId);
     if (!fs.existsSync(manifestPath)) return [];
     try {
-        return JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as ManagedFileGroup[];
+        return parseJsonText<ManagedFileGroup[]>(fs.readFileSync(manifestPath, 'utf-8'));
     } catch {
         return [];
     }
@@ -1418,8 +1670,17 @@ function getFeatureValueId(feature: ScriptFeature, field: ScriptField): string {
     return `${feature.id}:${field.id}`;
 }
 
-function getJsonPathValue(source: unknown, dottedPath: string): unknown {
-    return dottedPath.split('.').reduce<unknown>((acc, part) => {
+function splitJsonPath(pathValue: string): string[] {
+    const trimmed = (pathValue || '').trim();
+    if (!trimmed || trimmed === '$' || trimmed.toLowerCase() === 'root') return [];
+    const normalized = trimmed.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    return (normalized.includes('/') ? normalized.split('/') : normalized.split('.')).filter(Boolean);
+}
+
+function getJsonPathValue(source: unknown, jsonPath: string): unknown {
+    const parts = splitJsonPath(jsonPath);
+    if (parts.length === 0) return source;
+    return parts.reduce<unknown>((acc, part) => {
         if (acc && typeof acc === 'object' && part in acc) {
             return (acc as Record<string, unknown>)[part];
         }
@@ -1427,8 +1688,9 @@ function getJsonPathValue(source: unknown, dottedPath: string): unknown {
     }, source);
 }
 
-function setJsonPathValue(source: Record<string, unknown>, dottedPath: string, value: unknown): void {
-    const parts = dottedPath.split('.').filter(Boolean);
+function setJsonPathValue(source: Record<string, unknown>, jsonPath: string, value: unknown): void {
+    const parts = splitJsonPath(jsonPath);
+    if (parts.length === 0) return;
     let cursor: Record<string, unknown> = source;
     for (let i = 0; i < parts.length - 1; i++) {
         const part = parts[i];
@@ -1438,6 +1700,84 @@ function setJsonPathValue(source: Record<string, unknown>, dottedPath: string, v
         cursor = cursor[part] as Record<string, unknown>;
     }
     if (parts.length > 0) cursor[parts[parts.length - 1]] = value;
+}
+
+function deleteJsonPathValue(source: Record<string, unknown>, jsonPath: string): void {
+    const parts = splitJsonPath(jsonPath);
+    if (parts.length === 0) return;
+    let cursor: Record<string, unknown> = source;
+    for (let i = 0; i < parts.length - 1; i++) {
+        const child = cursor[parts[i]];
+        if (!child || typeof child !== 'object' || Array.isArray(child)) return;
+        cursor = child as Record<string, unknown>;
+    }
+    if (parts.length > 0) delete cursor[parts[parts.length - 1]];
+}
+
+function readJsonFileObject(fullPath: string): Record<string, unknown> {
+    if (!fs.existsSync(fullPath)) return {};
+    const parsed = parseJsonText<unknown>(fs.readFileSync(fullPath, 'utf-8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+}
+
+function getLinkedConfigBase(feature: ScriptFeature): string {
+    const parts = normalizeRelativePath(feature.linkedConfigPath || '').split('/').filter(Boolean);
+    if (parts[0]?.toLowerCase() === 'plugins' && parts.length >= 2) return parts.slice(0, 2).join('/');
+    return '';
+}
+
+function getManagedJsonEntryPath(feature: ScriptFeature, fileName: string): string {
+    if (feature.linkedConfigKeyTemplate) {
+        const template = normalizeRelativePath(feature.linkedConfigKeyTemplate);
+        return template.includes('$')
+            ? template.replaceAll('$', fileName)
+            : normalizeRelativePath(path.posix.join(template, fileName));
+    }
+    const fullTarget = normalizeRelativePath(path.posix.join(feature.targetDir || '', fileName));
+    const base = getLinkedConfigBase(feature);
+    return base && fullTarget.toLowerCase().startsWith(`${base.toLowerCase()}/`)
+        ? fullTarget.slice(base.length + 1)
+        : fullTarget;
+}
+
+function buildLinkedConfigMetadata(feature: ScriptFeature, fileName: string, metadata?: Record<string, unknown>): Record<string, unknown> {
+    const defaults = feature.linkedConfigFieldDefaults ?? {};
+    const selected = feature.linkedConfigSelectedFields ?? Object.keys(defaults);
+    const result: Record<string, unknown> = {};
+    if (feature.linkedConfigFilterKey && feature.linkedConfigFilterValue) {
+        result[feature.linkedConfigFilterKey] = feature.linkedConfigFilterValue;
+    }
+    for (const [key, value] of Object.entries(defaults)) {
+        if (!selected.includes(key)) result[key] = value;
+    }
+    for (const key of selected) {
+        result[key] = metadata?.[key] ?? defaults[key] ?? '';
+    }
+    return result;
+}
+
+function addLinkedConfigEntry(feature: ScriptFeature, fileName: string, metadata?: Record<string, unknown>): void {
+    if (!feature.linkedConfigPath || !feature.linkedConfigTargetPath) return;
+    const jsonPath = resolveBepInExRelative(feature.linkedConfigPath);
+    const jsonData = readJsonFileObject(jsonPath);
+    const target = getJsonPathValue(jsonData, feature.linkedConfigTargetPath);
+    const targetMap = target && typeof target === 'object' && !Array.isArray(target) ? target as Record<string, unknown> : {};
+    setJsonPathValue(jsonData, feature.linkedConfigTargetPath, targetMap);
+    targetMap[getManagedJsonEntryPath(feature, fileName)] = buildLinkedConfigMetadata(feature, fileName, metadata);
+    ensureParentDir(jsonPath);
+    fs.writeFileSync(jsonPath, JSON.stringify(jsonData, null, 2), 'utf-8');
+}
+
+function deleteLinkedConfigEntry(feature: ScriptFeature, fileName: string): void {
+    if (!feature.linkedConfigPath || !feature.linkedConfigTargetPath) return;
+    const jsonPath = resolveBepInExRelative(feature.linkedConfigPath);
+    if (!fs.existsSync(jsonPath)) return;
+    const jsonData = readJsonFileObject(jsonPath);
+    const target = getJsonPathValue(jsonData, feature.linkedConfigTargetPath);
+    if (target && typeof target === 'object' && !Array.isArray(target)) {
+        delete (target as Record<string, unknown>)[getManagedJsonEntryPath(feature, fileName)];
+    }
+    fs.writeFileSync(jsonPath, JSON.stringify(jsonData, null, 2), 'utf-8');
 }
 
 function coerceFieldValue(field: ScriptField, value: string | number | boolean): string | number | boolean {
@@ -1467,7 +1807,7 @@ export function getPackageSettings(packageId: string): PackageSettings {
         if (!fs.existsSync(fullPath)) continue;
 
         try {
-            const config = JSON.parse(fs.readFileSync(fullPath, 'utf-8')) as ScriptConfig;
+            const config = parseJsonText<ScriptConfig>(fs.readFileSync(fullPath, 'utf-8'));
             scripts.push({ scriptPath: sf.path, config });
             for (const feature of config.features ?? []) {
                 features.push(feature);
@@ -1518,7 +1858,7 @@ export function getPackageSettings(packageId: string): PackageSettings {
                     let jsonData: unknown = feature.sample ?? {};
                     if (jsonPath && fs.existsSync(jsonPath)) {
                         try {
-                            jsonData = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+                            jsonData = parseJsonText<unknown>(fs.readFileSync(jsonPath, 'utf-8'));
                         } catch {
                             warnings.push(`${feature.name}: JSON 파일을 파싱할 수 없습니다.`);
                         }
@@ -1608,7 +1948,7 @@ function getPackageFeatures(packageId: string): ScriptFeature[] {
         const fullPath = path.join(pkgDir, sf.path);
         if (!fs.existsSync(fullPath)) continue;
         try {
-            const config = JSON.parse(fs.readFileSync(fullPath, 'utf-8')) as ScriptConfig;
+            const config = parseJsonText<ScriptConfig>(fs.readFileSync(fullPath, 'utf-8'));
             features.push(...(config.features ?? []));
         } catch {
             // malformed scripts are reported by getPackageSettings
@@ -1619,6 +1959,10 @@ function getPackageFeatures(packageId: string): ScriptFeature[] {
 
 export function applyPackageSettings(packageId: string, changes: ApplyPackageSettingsChanges): PackageSettings {
     const features = getPackageFeatures(packageId);
+
+    if (changes.configText) {
+        writeConfigFileText(changes.configText.path, changes.configText.content);
+    }
 
     for (const feature of features) {
         if (feature.type === 'cfg_fields') {
@@ -1639,7 +1983,7 @@ export function applyPackageSettings(packageId: string, changes: ApplyPackageSet
             const jsonPath = resolveBepInExRelative(feature.jsonPath);
             let jsonData: Record<string, unknown> = {};
             if (fs.existsSync(jsonPath)) {
-                jsonData = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')) as Record<string, unknown>;
+                jsonData = parseJsonText<Record<string, unknown>>(fs.readFileSync(jsonPath, 'utf-8'));
             } else if (feature.sample && typeof feature.sample === 'object' && !Array.isArray(feature.sample)) {
                 jsonData = feature.sample as Record<string, unknown>;
             }
@@ -1672,6 +2016,7 @@ export function applyPackageSettings(packageId: string, changes: ApplyPackageSet
         const targetPath = path.join(targetDir, fileName);
         ensureParentDir(targetPath);
         fs.copyFileSync(fileImport.sourcePath, targetPath);
+        addLinkedConfigEntry(feature, fileName, fileImport.metadata);
 
         const groupIdx = manifest.findIndex((g) => g.featureId === feature.id);
         const nextGroup: ManagedFileGroup =
@@ -1692,14 +2037,11 @@ export function applyPackageSettings(packageId: string, changes: ApplyPackageSet
         }
         const targetPath = path.join(resolveBepInExRelative(feature.targetDir), path.basename(fileDelete.fileName));
         if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
+        deleteLinkedConfigEntry(feature, fileDelete.fileName);
         group.files = group.files.filter((file) => file !== fileDelete.fileName);
     }
     manifest = manifest.filter((group) => group.files.length > 0);
     writeManagedManifest(packageId, manifest);
-
-    if (changes.configText) {
-        writeConfigFileText(changes.configText.path, changes.configText.content);
-    }
 
     return getPackageSettings(packageId);
 }

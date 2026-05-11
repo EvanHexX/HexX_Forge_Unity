@@ -124,8 +124,8 @@ export function registerModIpc(): void {
         return fs.readFileSync(guidePath, 'utf-8');
     });
 
-    ipcMain.handle('mods:import-dll', (_event, filePath: string, name: string, author: string) =>
-        importDllMod(filePath, name, author)
+    ipcMain.handle('mods:import-dll', (_event, filePath: string, name: string, author: string, version?: string) =>
+        importDllMod(filePath, name, author, version)
     );
 
     ipcMain.handle('mods:import-zip', (_event, filePath: string) =>
@@ -142,6 +142,8 @@ export function registerModIpc(): void {
                 author: string;
                 description: string;
                 packageType: 'collection' | 'single';
+                version?: string;
+                dependency?: { target: string; displayName?: string };
                 files: Array<{
                     entryName: string;
                     type: ModFileType;
@@ -166,6 +168,8 @@ export function registerModIpc(): void {
                 author: string;
                 description: string;
                 packageType: 'collection' | 'single';
+                version?: string;
+                dependency?: { target: string; displayName?: string };
                 files: Array<{ filePath: string; name: string; author: string }>;
             }
         ) => createAndImportPackage(data)
@@ -208,6 +212,8 @@ export function registerModIpc(): void {
                 author: string;
                 description: string;
                 packageType: 'collection' | 'single';
+                version?: string;
+                dependency?: { target: string; displayName?: string };
                 files: Array<{ filePath: string; name: string; author: string }>;
                 settingsScript?: ScriptConfig | null;
                 sources?: Array<{

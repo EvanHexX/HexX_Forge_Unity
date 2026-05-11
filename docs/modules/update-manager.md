@@ -35,6 +35,18 @@ For a local package without upload, run `npm.cmd run dist`.
 - `npm.cmd run dist` creates Windows release artifacts and updater metadata.
 - `release/win-unpacked/resources/resources/tools/AssetManager/AssetManager_UnityPy.exe` exists.
 - `release/win-unpacked/resources/resources/tools/ffmpeg/ffmpeg.exe` exists.
+- `release/win-unpacked/resources/resources/tools/ffmpeg/ffprobe.exe` exists.
+- `release/win-unpacked/resources/resources/tools/frei0r/filter/select0r.dll` exists.
+- `release/win-unpacked/resources/resources/tools/frei0r/filter/keyspillm0pup.dll` exists.
+- `release/win-unpacked/resources/resources/tools/frei0r/filter/alpha0ps_alpha0ps.dll` exists.
+- `release/win-unpacked/resources/resources/tools/frei0r/filter/saturat0r.dll` exists.
+- Packaged FFmpeg can load frei0r plugins from the packaged resource path. At minimum, run a short `frei0r=select0r` dry-run against `release/win-unpacked/resources/resources/tools/frei0r/filter` before publishing.
 - `release/win-unpacked/resources/resources/tools/AssetManager/work` and `reports` are not bundled.
 - A lower installed version can check a newer GitHub Release, download it, and restart into the new version.
 - Development mode keeps the update UI stable and reports that updates are available only in packaged builds.
+
+## Follow-up integrity policy
+
+- Current release gate: required runtime file existence plus FFmpeg/frei0r dry-run validation.
+- Next minor release target: generate a `resources/manifest.json` during release packaging and verify SHA-256 hashes for required runtime files after update installation or on first launch after update.
+- If manifest validation fails, the app should keep general UI usable, disable affected tool actions, and show a copyable `NotificationContext` diagnostic instead of failing later during export.

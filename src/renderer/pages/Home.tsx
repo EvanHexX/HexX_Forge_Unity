@@ -3,7 +3,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Box, Button, Card, CardActionArea, CardContent, Chip, Collapse, Link, Stack, Typography } from '@mui/material';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SettingsIcon from '@mui/icons-material/Settings';
+import { useNotification } from '../context/NotificationContext';
+import { getSafeLanguage, t, type I18nKey, type LanguageCode } from '../i18n';
 
 type Props = {
     onOpenSettings: () => void;
@@ -15,65 +18,78 @@ type UpdateStatus = Awaited<ReturnType<typeof window.electronAPI.getUpdateStatus
 type GitHubRelease = Awaited<ReturnType<typeof window.electronAPI.getGitHubReleases>>[number];
 type AssetStatus = Awaited<ReturnType<typeof window.electronAPI.getAssetStatus>>;
 
-const docCards = [
+type DocCard = {
+    id: string;
+    title: string;
+    descKey: I18nKey;
+    statusKey: I18nKey;
+    docs: string;
+    detailKey: I18nKey;
+};
+
+const NEWS_RELEASE_LIMIT = 3;
+
+const docCards: DocCard[] = [
     {
         id: 'mod',
         title: 'Mod Manager',
-        desc: 'BepInEx 플러그인과 패키지를 관리합니다.',
-        status: '사용 가능',
+        descKey: 'home.doc.mod.desc',
+        statusKey: 'home.doc.mod.status',
         docs: 'docs/modules/mod-manager.md',
-        detail: 'DLL 활성/비활성, zip 패키지 가져오기, 패키지 설정 편집을 중심으로 확장 중입니다.'
+        detailKey: 'home.doc.mod.detail'
     },
     {
         id: 'asset',
         title: 'Asset Manager',
-        desc: '백업, 폰트, 텍스처, 어셋팩 패치를 처리합니다.',
-        status: '사용 가능',
+        descKey: 'home.doc.asset.desc',
+        statusKey: 'home.doc.asset.status',
         docs: 'docs/modules/asset-manager.md',
-        detail: 'Unity 리소스 백업과 복원, 폰트 교체, 텍스처 교체, 어셋팩 적용 흐름을 제공합니다.'
+        detailKey: 'home.doc.asset.detail'
     },
     {
         id: 'graphics',
         title: 'Graphics Tool',
-        desc: '영상과 이미지 기반 그래픽 작업을 준비합니다.',
-        status: '확장 중',
+        descKey: 'home.doc.graphics.desc',
+        statusKey: 'home.doc.graphics.status',
         docs: 'docs/modules/graphics-tool.md',
-        detail: 'portrait loop, export, preset 작업을 위한 도구 영역입니다.'
+        detailKey: 'home.doc.graphics.detail'
     },
     {
         id: 'cheat',
         title: 'Cheat Engine',
-        desc: '게임 편의 기능을 위한 도구 영역입니다.',
-        status: '구현 예정',
+        descKey: 'home.doc.cheat.desc',
+        statusKey: 'home.doc.cheat.status',
         docs: '',
-        detail: '상세 기능 설명서는 아직 작성되지 않았습니다. TODO에 문서 작성 항목으로 남깁니다.'
+        detailKey: 'home.doc.cheat.detail'
     },
     {
         id: 'optimizer',
         title: 'Optimizer',
-        desc: '비급 최적화 도구 연결을 준비합니다.',
-        status: '구현 예정',
+        descKey: 'home.doc.optimizer.desc',
+        statusKey: 'home.doc.optimizer.status',
         docs: '',
-        detail: '기존 PySide6 실행 파일 연동 방식 검토 후 구현 예정입니다.'
+        detailKey: 'home.doc.optimizer.detail'
     },
     {
         id: 'settings',
         title: 'Settings',
-        desc: '게임, 테마, 타이포그래피, 업데이트를 설정합니다.',
-        status: '사용 가능',
-        docs: '문서 준비 중',
-        detail: '지원 게임별 설치 경로와 앱 표시 환경을 관리합니다.'
+        descKey: 'home.doc.settings.desc',
+        statusKey: 'home.doc.settings.status',
+        docs: '',
+        detailKey: 'home.doc.settings.detail'
     }
 ];
 
 export default function Home({ onOpenSettings }: Props) {
+    const { showNotification } = useNotification();
     const [version, setVersion] = useState('');
     const [settings, setSettings] = useState<AppSettings | null>(null);
     const [supportedGames, setSupportedGames] = useState<SupportedGame[]>([]);
     const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
     const [assetStatus, setAssetStatus] = useState<AssetStatus | null>(null);
     const [releases, setReleases] = useState<GitHubRelease[]>([]);
-    const [releaseError, setReleaseError] = useState('');
+    const [releaseLoadFailed, setReleaseLoadFailed] = useState(false);
+    const [launchingGame, setLaunchingGame] = useState(false);
     const [openCardId, setOpenCardId] = useState<string | null>(null);
     const [docsCardId, setDocsCardId] = useState<string | null>(null);
 
@@ -85,19 +101,50 @@ export default function Home({ onOpenSettings }: Props) {
         window.electronAPI.getAssetStatus().then(setAssetStatus).catch(() => setAssetStatus(null));
         window.electronAPI.getGitHubReleases()
             .then(setReleases)
-            .catch(() => setReleaseError('GitHub 릴리스 정보를 불러오지 못했습니다.'));
+            .catch(() => setReleaseLoadFailed(true));
 
         return window.electronAPI.onUpdateStatus(setUpdateStatus);
     }, []);
 
+    const currentLanguage = getSafeLanguage(settings?.language);
     const selectedGame = useMemo(() => {
         const gameId = settings?.selectedGameId || 'long-yin-li-zhi-zhuan';
         return supportedGames.find((game) => game.id === gameId) || supportedGames[0];
     }, [settings?.selectedGameId, supportedGames]);
 
-    const badge = getUpdateBadge(updateStatus);
+    const badge = getUpdateBadge(updateStatus, currentLanguage);
     const gamePath = settings?.gamePath || '';
-    const backupState = getBackupState(gamePath, assetStatus);
+    const selectedGameName = getGameDisplayName(selectedGame, currentLanguage);
+    const backupState = getBackupState(gamePath, assetStatus, currentLanguage);
+    const latestReleases = useMemo(
+        () => [...releases]
+            .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+            .slice(0, NEWS_RELEASE_LIMIT),
+        [releases]
+    );
+
+    const handleLaunchGame = async () => {
+        if (!gamePath || launchingGame) return;
+
+        setLaunchingGame(true);
+        try {
+            const result = await window.electronAPI.launchGame();
+            if (result.ok) {
+                showNotification(t('home.launch.success', currentLanguage), 'success');
+                return;
+            }
+
+            showNotification(t('home.launch.failure', currentLanguage), 'error', {
+                copyText: result.message
+            });
+        } catch (error) {
+            showNotification(t('home.launch.failure', currentLanguage), 'error', {
+                copyText: getErrorMessage(error)
+            });
+        } finally {
+            setLaunchingGame(false);
+        }
+    };
 
     return (
         <Box sx={{ color: 'var(--text-color)' }}>
@@ -119,21 +166,46 @@ export default function Home({ onOpenSettings }: Props) {
                         />
                     </Stack>
                     <Typography sx={{ mt: 1, color: 'var(--text-color-light)', maxWidth: 760 }}>
-                        Unity 기반 게임의 모드, 폰트, 어셋 패치를 한 곳에서 관리하는 데스크톱 도구입니다.
+                        {t('home.app.subtitle', currentLanguage)}
                     </Typography>
                     <Typography sx={{ mt: 1, color: 'var(--text-color-secondary)', fontSize: 13 }}>
-                        지원 게임: {selectedGame?.displayName || '용윤입지전'}
+                        {t('home.supportedGame', currentLanguage)} {selectedGameName}
                     </Typography>
                 </Box>
             </Stack>
 
             <Box sx={sectionSx}>
                 <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                    상태
+                    {t('home.section.status', currentLanguage)}
                 </Typography>
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mt: 2 }}>
-                    <StatusItem label="현재 게임" value={selectedGame?.displayName || '용윤입지전'} />
-                    <StatusItem label="백업 상태" value={backupState.label} tone={backupState.tone} />
+                    <StatusItem
+                        label={t('home.status.currentGame', currentLanguage)}
+                        value={selectedGameName}
+                    />
+                    <StatusItem
+                        label={t('home.status.backup', currentLanguage)}
+                        value={backupState.label}
+                        tone={backupState.tone}
+                    />
+                    <Box sx={{ ...statusItemSx, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <Typography sx={{ color: 'var(--text-color-secondary)', fontSize: 12, fontWeight: 700 }}>
+                            {t('home.status.launch', currentLanguage)}
+                        </Typography>
+                        <Button
+                            variant="contained"
+                            size="small"
+                            startIcon={<PlayArrowIcon />}
+                            onClick={handleLaunchGame}
+                            disabled={!gamePath || launchingGame}
+                            sx={{ alignSelf: 'flex-start', background: 'var(--button-bg-color)', color: 'var(--button-text-color)' }}
+                        >
+                            {launchingGame ? t('home.button.launchingGame', currentLanguage) : t('home.button.launchGame', currentLanguage)}
+                        </Button>
+                        <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12 }}>
+                            {t('home.status.launchHint', currentLanguage)}
+                        </Typography>
+                    </Box>
                 </Stack>
                 <Stack direction="row" spacing={1.5} sx={{ mt: 2, alignItems: 'center' }}>
                     <Typography sx={{ color: backupState.color, fontSize: 14 }}>
@@ -147,14 +219,14 @@ export default function Home({ onOpenSettings }: Props) {
                             onClick={onOpenSettings}
                             sx={{ background: 'var(--button-bg-color)', color: 'var(--button-text-color)' }}
                         >
-                            Settings
+                            {t('home.button.settings', currentLanguage)}
                         </Button>
                     )}
                 </Stack>
                 {gamePath && backupState.missing.length > 0 && (
                     <Stack direction="row" spacing={1.5} sx={{ mt: 2, alignItems: 'center' }}>
                         <Typography sx={{ color: 'var(--text-color-secondary)', fontSize: 13 }}>
-                            Asset Manager에서 {backupState.missing.join(', ')} 백업을 먼저 진행하세요.
+                            {t('home.backup.missingMessagePrefix', currentLanguage)} {backupState.missing.join(', ')}
                         </Typography>
                     </Stack>
                 )}
@@ -162,28 +234,28 @@ export default function Home({ onOpenSettings }: Props) {
 
             <Box sx={sectionSx}>
                 <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                    뉴스 및 업데이트
+                    {t('home.section.news', currentLanguage)}
                 </Typography>
                 <Stack spacing={1.5} sx={{ mt: 2 }}>
-                    {releases.slice(0, 3).map((release) => (
+                    {latestReleases.map((release) => (
                         <Box key={release.id} sx={newsItemSx}>
                             <Stack direction="row" spacing={2} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
                                 <Typography sx={{ fontWeight: 800 }}>{release.name}</Typography>
                                 <Typography sx={{ color: 'var(--text-color-secondary)', fontSize: 12 }}>
-                                    {formatDate(release.publishedAt)}
+                                    {formatDate(release.publishedAt, currentLanguage)}
                                 </Typography>
                             </Stack>
                             <Typography sx={{ mt: 0.75, color: 'var(--text-color-light)', fontSize: 13 }}>
-                                {summarizeRelease(release.body)}
+                                {summarizeRelease(release.body, currentLanguage)}
                             </Typography>
                             <Link href={release.htmlUrl} target="_blank" rel="noreferrer" sx={{ mt: 0.75, display: 'inline-block' }}>
-                                GitHub에서 보기
+                                {t('home.button.details', currentLanguage)}
                             </Link>
                         </Box>
                     ))}
                     {releases.length === 0 && (
                         <Typography sx={{ color: 'var(--text-color-light)' }}>
-                            {releaseError || '표시할 GitHub 릴리스가 아직 없습니다.'}
+                            {releaseLoadFailed ? t('home.release.loadFailed', currentLanguage) : t('home.release.empty', currentLanguage)}
                         </Typography>
                     )}
                 </Stack>
@@ -191,7 +263,7 @@ export default function Home({ onOpenSettings }: Props) {
 
             <Box sx={{ ...sectionSx, mb: 2 }}>
                 <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                    설명서
+                    {t('home.section.docs', currentLanguage)}
                 </Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 2, mt: 2 }}>
                     {docCards.map((card) => {
@@ -226,53 +298,53 @@ export default function Home({ onOpenSettings }: Props) {
                                             <Typography variant="h6" sx={{ fontWeight: 800 }}>
                                                 {card.title}
                                             </Typography>
-                                            <Chip size="small" label={card.status} />
+                                            <Chip size="small" label={t(card.statusKey, currentLanguage)} />
                                         </Stack>
                                         <Typography sx={{ mt: 1, color: 'var(--text-color-light)', fontSize: 14 }}>
-                                            {card.desc}
+                                            {t(card.descKey, currentLanguage)}
                                         </Typography>
                                     </CardContent>
                                 </CardActionArea>
                                 <Collapse in={open} timeout="auto" unmountOnExit>
                                     <CardContent sx={{ pt: 0 }}>
-                                            <Box sx={{ pt: 2, borderTop: '1px solid var(--border-color)' }}>
-                                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 13 }}>
-                                                    {card.detail}
-                                                </Typography>
-                                                <Button
-                                                    variant="outlined"
-                                                    size="small"
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        setDocsCardId(docsOpen ? null : card.id);
+                                        <Box sx={{ pt: 2, borderTop: '1px solid var(--border-color)' }}>
+                                            <Typography sx={{ color: 'var(--text-color-light)', fontSize: 13 }}>
+                                                {t(card.detailKey, currentLanguage)}
+                                            </Typography>
+                                            <Button
+                                                variant="outlined"
+                                                size="small"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    setDocsCardId(docsOpen ? null : card.id);
+                                                }}
+                                                sx={{ mt: 1.5, color: 'var(--text-color)', borderColor: 'var(--border-color)' }}
+                                            >
+                                                {t('home.button.more', currentLanguage)}
+                                            </Button>
+                                            <Collapse in={docsOpen} timeout="auto" unmountOnExit>
+                                                <Box
+                                                    sx={{
+                                                        mt: 2,
+                                                        p: 2,
+                                                        border: '1px solid var(--border-color)',
+                                                        borderRadius: 1,
+                                                        background: 'var(--input-bg-color)'
                                                     }}
-                                                    sx={{ mt: 1.5, color: 'var(--text-color)', borderColor: 'var(--border-color)' }}
+                                                    onClick={(event) => event.stopPropagation()}
                                                 >
-                                                    상세 설명 보기
-                                                </Button>
-                                                <Collapse in={docsOpen} timeout="auto" unmountOnExit>
-                                                    <Box
-                                                        sx={{
-                                                            mt: 2,
-                                                            p: 2,
-                                                            border: '1px solid var(--border-color)',
-                                                            borderRadius: 1,
-                                                            background: 'var(--input-bg-color)'
-                                                        }}
-                                                        onClick={(event) => event.stopPropagation()}
-                                                    >
-                                                        <Typography sx={{ fontWeight: 800 }}>
-                                                            {card.title} 설명서
-                                                        </Typography>
-                                                        <Typography sx={{ mt: 1, color: 'var(--text-color-light)', fontSize: 13 }}>
-                                                            연결 문서: {card.docs || '문서 준비 중'}
-                                                        </Typography>
-                                                        <Typography sx={{ mt: 1, color: 'var(--text-color-secondary)', fontSize: 13 }}>
-                                                            다음 단계에서 이 영역에 docs 파일 내용을 렌더링하도록 연결합니다.
-                                                        </Typography>
-                                                    </Box>
-                                                </Collapse>
-                                            </Box>
+                                                    <Typography sx={{ fontWeight: 800 }}>
+                                                        {card.title} {t('home.section.docs', currentLanguage)}
+                                                    </Typography>
+                                                    <Typography sx={{ mt: 1, color: 'var(--text-color-light)', fontSize: 13 }}>
+                                                        {t('home.docs.connectedDocument', currentLanguage)} {card.docs || t('home.docs.notReady', currentLanguage)}
+                                                    </Typography>
+                                                    <Typography sx={{ mt: 1, color: 'var(--text-color-secondary)', fontSize: 13 }}>
+                                                        {t('home.docs.nextStep', currentLanguage)}
+                                                    </Typography>
+                                                </Box>
+                                            </Collapse>
+                                        </Box>
                                     </CardContent>
                                 </Collapse>
                             </Card>
@@ -297,11 +369,18 @@ function StatusItem({ label, value, tone = 'normal' }: { label: string; value: s
     );
 }
 
-function getBackupState(gamePath: string, assetStatus: AssetStatus | null) {
+function getGameDisplayName(game: SupportedGame | undefined, language: LanguageCode) {
+    if (!game) return t('home.defaultGame', language);
+    if (game.id === 'long-yin-li-zhi-zhuan') return t('home.game.longYinLiZhiZhuan', language);
+
+    return game.displayName;
+}
+
+function getBackupState(gamePath: string, assetStatus: AssetStatus | null, language: LanguageCode) {
     if (!gamePath) {
         return {
-            label: '설정 필요',
-            message: '설정에서 게임 설치 폴더를 지정하세요.',
+            label: t('home.backup.requiredSettings', language),
+            message: t('home.backup.requiredSettingsMessage', language),
             tone: 'warning' as const,
             color: 'var(--accent-color)',
             missing: [] as string[]
@@ -310,8 +389,8 @@ function getBackupState(gamePath: string, assetStatus: AssetStatus | null) {
 
     if (!assetStatus) {
         return {
-            label: '확인 중',
-            message: '어셋 백업 상태를 확인하는 중입니다.',
+            label: t('home.backup.checking', language),
+            message: t('home.backup.checkingMessage', language),
             tone: 'normal' as const,
             color: 'var(--text-color-light)',
             missing: [] as string[]
@@ -319,14 +398,14 @@ function getBackupState(gamePath: string, assetStatus: AssetStatus | null) {
     }
 
     const missing = [
-        assetStatus.font ? '' : '폰트',
-        assetStatus.asset ? '' : '어셋'
+        assetStatus.font ? '' : t('home.backup.missing.font', language),
+        assetStatus.asset ? '' : t('home.backup.missing.asset', language)
     ].filter(Boolean);
 
     if (missing.length > 0) {
         return {
-            label: '백업 필요',
-            message: '설정 정보가 연결되었습니다. 안전한 작업을 위해 필요한 백업을 먼저 진행하세요.',
+            label: t('home.backup.required', language),
+            message: t('home.backup.requiredMessage', language),
             tone: 'warning' as const,
             color: 'var(--accent-color)',
             missing
@@ -334,49 +413,59 @@ function getBackupState(gamePath: string, assetStatus: AssetStatus | null) {
     }
 
     return {
-        label: '정상',
-        message: '설정 정보와 폰트/어셋 백업 상태가 정상입니다.',
+        label: t('home.backup.normal', language),
+        message: t('home.backup.normalMessage', language),
         tone: 'normal' as const,
         color: 'var(--text-color-light)',
         missing: [] as string[]
     };
 }
 
-function getUpdateBadge(status: UpdateStatus | null) {
+function getUpdateBadge(status: UpdateStatus | null, language: LanguageCode) {
     if (!status) {
         return {
-            label: '상태 확인 중',
+            label: t('home.updateBadge.checking', language),
             color: 'var(--text-color)',
             bg: 'color-mix(in srgb, var(--secondary-color) 18%, transparent)',
             border: 'var(--border-color)'
         };
     }
 
-    if (status.state === 'available') return badge('업데이트 있음', '#0f5132', '#d1e7dd', '#badbcc');
-    if (status.state === 'downloaded') return badge('설치 준비됨', '#664d03', '#fff3cd', '#ffecb5');
-    if (status.state === 'error') return badge('업데이트 오류', '#842029', '#f8d7da', '#f5c2c7');
-    if (status.state === 'checking' || status.state === 'downloading') return badge('업데이트 확인 중', '#084298', '#cfe2ff', '#b6d4fe');
+    if (status.state === 'available') return badge(t('home.updateBadge.available', language), '#0f5132', '#d1e7dd', '#badbcc');
+    if (status.state === 'downloaded') return badge(t('home.updateBadge.downloaded', language), '#664d03', '#fff3cd', '#ffecb5');
+    if (status.state === 'error') return badge(t('home.updateBadge.error', language), '#842029', '#f8d7da', '#f5c2c7');
+    if (status.state === 'checking' || status.state === 'downloading') return badge(t('home.updateBadge.inProgress', language), '#084298', '#cfe2ff', '#b6d4fe');
 
-    return badge('최신 상태', '#055160', '#cff4fc', '#b6effb');
+    return badge(t('home.updateBadge.latest', language), '#055160', '#cff4fc', '#b6effb');
 }
 
 function badge(label: string, color: string, bg: string, border: string) {
     return { label, color, bg, border };
 }
 
-function summarizeRelease(body: string) {
+function summarizeRelease(body: string, language: LanguageCode) {
     const firstLine = body
         .split('\n')
         .map((line) => line.replace(/^#+\s*/, '').trim())
         .find(Boolean);
 
-    if (!firstLine) return '릴리스 상세 내용은 GitHub에서 확인할 수 있습니다.';
+    if (!firstLine) return t('home.release.summaryFallback', language);
     return firstLine.length > 140 ? `${firstLine.slice(0, 140)}...` : firstLine;
 }
 
-function formatDate(value: string) {
+function formatDate(value: string, language: LanguageCode) {
     if (!value) return '-';
-    return new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value));
+    return new Intl.DateTimeFormat(getDateLocale(language), { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value));
+}
+
+function getDateLocale(language: LanguageCode) {
+    if (language === 'ko') return 'ko-KR';
+    if (language === 'zh-CN') return 'zh-CN';
+    return 'en-US';
+}
+
+function getErrorMessage(error: unknown) {
+    return error instanceof Error ? error.message : '';
 }
 
 const sectionSx = {

@@ -7,6 +7,7 @@ import {
     getSupportedGames,
     getThemes,
     getTypographyOptions,
+    launchGame,
     setGamePath,
     setLanguage,
     setSelectedGame,
@@ -24,6 +25,7 @@ export function registerConfigIpc(): void {
     ipcMain.handle('config:set-language', (_event, language: string) => setLanguage(language));
     ipcMain.handle('config:set-selected-game', (_event, gameId: string) => setSelectedGame(gameId));
     ipcMain.handle('config:set-game-path', (_event, gamePath: string, gameId?: string) => setGamePath(gamePath, gameId));
+    ipcMain.handle('game:launch', () => launchGame());
 
     ipcMain.handle('dialog:select-directory', async () => {
         const result = await dialog.showOpenDialog({

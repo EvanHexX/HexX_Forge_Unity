@@ -3,6 +3,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import {
     getBundledConfigPath,
     getConfigPath,
@@ -42,6 +43,12 @@ export type SupportedGame = {
     id: string;
     displayName: string;
     installFolderHint: string;
+    executableName: string;
+};
+
+export type LaunchGameResult = {
+    ok: boolean;
+    message?: string;
 };
 
 export const DEFAULT_GAME_ID = 'long-yin-li-zhi-zhuan';
@@ -54,7 +61,8 @@ const SUPPORTED_GAMES: SupportedGame[] = [
     {
         id: DEFAULT_GAME_ID,
         displayName: '용윤입지전',
-        installFolderHint: 'LongYinLiZhiZhuan 폴더'
+        installFolderHint: 'LongYinLiZhiZhuan 폴더',
+        executableName: 'LongYinLiZhiZhuan.exe'
     }
 ];
 
@@ -147,6 +155,54 @@ export function getTypographyOptions(): TypographyOption[] {
 
 export function getSupportedGames(): SupportedGame[] {
     return SUPPORTED_GAMES;
+}
+
+function getSupportedGame(gameId: string): SupportedGame | undefined {
+    return SUPPORTED_GAMES.find((game) => game.id === gameId);
+}
+
+export async function launchGame(): Promise<LaunchGameResult> {
+    const settings = getAppSettings();
+    const game = getSupportedGame(settings.selectedGameId);
+
+    if (!settings.gamePath) {
+        return { ok: false, message: '게임 설치 폴더가 설정되지 않았습니다.' };
+    }
+
+    if (!game) {
+        return { ok: false, message: `지원하지 않는 게임입니다: ${settings.selectedGameId}` };
+    }
+
+    const executablePath = path.join(settings.gamePath, game.executableName);
+
+    if (!fs.existsSync(executablePath)) {
+        return { ok: false, message: `실행 파일을 찾지 못했습니다: ${executablePath}` };
+    }
+
+    return new Promise((resolve) => {
+        try {
+            const child = spawn(executablePath, [], {
+                cwd: settings.gamePath,
+                detached: true,
+                windowsHide: false,
+                stdio: 'ignore'
+            });
+
+            child.once('spawn', () => {
+                child.unref();
+                resolve({ ok: true });
+            });
+
+            child.once('error', (error) => {
+                resolve({ ok: false, message: error.message });
+            });
+        } catch (error) {
+            resolve({
+                ok: false,
+                message: error instanceof Error ? error.message : '게임 실행 중 알 수 없는 오류가 발생했습니다.'
+            });
+        }
+    });
 }
 
 export function setTheme(themeName: string): AppSettings {

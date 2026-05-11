@@ -1,7 +1,7 @@
 // src/preload/preload.ts
 // Renderer에서 안전하게 사용할 Electron API를 노출합니다.
 
-import {contextBridge, ipcRenderer} from 'electron';
+import {contextBridge, ipcRenderer, webUtils} from 'electron';
 
 type UpdateStatus = {
     state: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
@@ -40,6 +40,11 @@ type OnlineModCatalogItem = {
     updateAvailable?: boolean;
 };
 
+type LaunchGameResult = {
+    ok: boolean;
+    message?: string;
+};
+
 const electronAPI = {
     getVersion: (): Promise<string> => ipcRenderer.invoke('app:get-version'),
     getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:get-status'),
@@ -67,6 +72,7 @@ const electronAPI = {
     setGamePath: (gamePath: string, gameId?: string) => ipcRenderer.invoke('config:set-game-path', gamePath, gameId),
     selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
     getGitHubReleases: (): Promise<GitHubRelease[]> => ipcRenderer.invoke('github:get-releases'),
+    launchGame: (): Promise<LaunchGameResult> => ipcRenderer.invoke('game:launch'),
 
     // Mod Manager
     scanMods: () => ipcRenderer.invoke('mods:scan'),
@@ -90,8 +96,8 @@ const electronAPI = {
     setDllEnabled: (relativePath: string, enabled: boolean) =>
         ipcRenderer.invoke('mods:set-dll-enabled', relativePath, enabled),
 
-    importDllMod: (filePath: string, name: string, author: string) =>
-        ipcRenderer.invoke('mods:import-dll', filePath, name, author),
+    importDllMod: (filePath: string, name: string, author: string, version?: string) =>
+        ipcRenderer.invoke('mods:import-dll', filePath, name, author, version),
     importZipMod: (filePath: string) =>
         ipcRenderer.invoke('mods:import-zip', filePath),
     importZipConfigured: (
@@ -101,6 +107,8 @@ const electronAPI = {
             author: string;
             description: string;
             packageType: 'collection' | 'single';
+            version?: string;
+            dependency?: { target: string; displayName?: string };
             files: Array<{
                 entryName: string;
                 type: string;
@@ -115,6 +123,8 @@ const electronAPI = {
         author: string;
         description: string;
         packageType: 'collection' | 'single';
+        version?: string;
+        dependency?: { target: string; displayName?: string };
         files: Array<{ filePath: string; name: string; author: string }>;
     }) => ipcRenderer.invoke('mods:create-and-import', data),
 
@@ -163,6 +173,8 @@ const electronAPI = {
         author: string;
         description: string;
         packageType: 'collection' | 'single';
+        version?: string;
+        dependency?: { target: string; displayName?: string };
         files: Array<{ filePath: string; name: string; author: string }>;
         settingsScript?: unknown;
         sources?: Array<{
@@ -189,6 +201,10 @@ const electronAPI = {
     getGraphicsConfig: () => ipcRenderer.invoke('graphics:get-config'),
     selectGraphicsVideo: () => ipcRenderer.invoke('graphics:select-video'),
     selectGraphicsImage: () => ipcRenderer.invoke('graphics:select-image'),
+    resolveDroppedGraphicsFile: (file: File, kind: 'video' | 'image') => {
+        const filePath = webUtils.getPathForFile(file);
+        return ipcRenderer.invoke('graphics:resolve-dropped-file', { filePath, kind });
+    },
     checkFfmpeg: () => ipcRenderer.invoke('graphics:check-ffmpeg'),
     createPortraitLoop: (params: any) => ipcRenderer.invoke('graphics:create-loop', params),
     exportPortraitVideo: (params: any) => ipcRenderer.invoke('graphics:export-video', params),

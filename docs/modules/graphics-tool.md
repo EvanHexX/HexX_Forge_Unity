@@ -1,5 +1,23 @@
 # Graphics Tool
 
+## 2026-05-11 Seek-Then-Play Policy
+
+- `VideoPreviewController.seek(seconds)`는 `Promise<void>`를 반환한다.
+- `seek()`는 `currentTime`을 설정한 뒤 `seeked` 이벤트 또는 짧은 timeout fallback으로 commit되었다고 판단될 때 resolve한다.
+- `play()`는 마지막 seek 목표 시간이 남아 있고 현재 video 위치와 다르면 먼저 `await seek(lastCommandedTime)`을 수행한 뒤 `video.play()`를 호출한다.
+- 이 순서는 paused 상태에서 timeline seek 후 Play가 0초부터 시작되는 Electron/Chromium race condition을 막기 위한 Graphics Tool preview 정책이다.
+- Stop만 `currentTime = 0` reset을 수행하며, Pause/Play/Seek는 reset state를 공유하지 않는다.
+- `hexx-resource://selected-media` video preview는 Chromium media seek를 위해 byte range response가 필요하다. Main process custom protocol은 `Range` 요청을 `206 Partial Content`로 처리하고 `Accept-Ranges`, `Content-Range`, `Content-Length`를 반환한다.
+
+## 2026-05-11 Video Preview Controller Update
+
+- Video Tool preview video의 소유권은 `CanvasFilteredMedia`가 가진다.
+- Parent인 `VideoTool`은 `HTMLVideoElement`를 직접 조작하지 않고 `VideoPreviewController`의 `play()`, `pause()`, `stop()`, `seek()`만 호출한다.
+- `playing`, `seekRequest`, `stopRequest` prop으로 media command를 전달하지 않는다. 이 방식은 React state update와 native media event가 서로 끊어먹는 race condition을 만들 수 있다.
+- `onPlaybackState`는 ref로 보관하고 event listener effect dependency에 넣지 않는다. callback identity 변화로 listener를 재등록하고 즉시 `setCurrentTime`을 호출하면 `Maximum update depth exceeded`가 재발할 수 있다.
+- `play()` promise의 `AbortError`는 normal interruption으로 처리한다. 빠른 Pause, source 교체, component unmount 중 발생할 수 있으므로 사용자 console error로 남기지 않는다.
+- Draw loop는 재생 중 `requestVideoFrameCallback`을 우선 사용하고, pause/seek 상태에서는 필요한 프레임만 redraw한다.
+
 ## 목적
 
 Graphics Tool은 게임 초상화 교체에 필요한 비디오, 이미지, 리깅 준비 작업을 한 화면에서 처리하는 도구다. 현재 기준 게임은 `LongYinLiZhiZhuan`이며, 이후 다른 게임을 추가할 수 있도록 출력 규격, 오버레이 자산, 필터 프리셋을 `config/graphics_presets.json`으로 분리한다.
@@ -157,3 +175,14 @@ v1에서는 실제 atlas 생성 기능을 구현하지 않는다. 현재는 스�
 - rigging mockup 상태.
 
 다른 게임을 추가할 때는 UI 상수와 로직을 직접 늘리기보다 이 설정 구조를 확장하는 방향을 우선한다.
+
+## 2026-05-11 Timeline / Drag-and-drop Notes
+
+- Video Tool timeline seek는 React state request만 신뢰하지 않고, renderer가 실제 hidden `HTMLVideoElement` ref를 잡아 `currentTime`, `play()`, `pause()`를 직접 제어한다.
+- `Stop`만 0초 reset을 수행한다. 일반 seek/play 경로는 stop/reset state와 공유하지 않는다.
+- hidden video native event가 seek 직후 0초를 publish할 수 있으므로, parent state는 마지막 user seek guard를 유지하고 stale `0` publish를 무시한다.
+- timeline ruler 위에는 MUI `Tooltip`을 두지 않는다. ruler 클릭/드래그가 pointer event를 직접 받아야 하기 때문이다.
+- Video Tool과 Image Tool은 native dialog 외에 drag-and-drop 입력을 지원한다.
+- Drop된 `File`은 preload에서 Electron `webUtils.getPathForFile()`로 OS path를 얻은 뒤 main process `graphics:resolve-dropped-file`에서 확장자와 존재 여부를 검증한다.
+- 검증된 파일만 기존 `hexx-resource://selected-media/?path=...` URL로 renderer에 반환한다.
+- 지원 확장자는 Video `mp4/mov/webm/mkv/avi`, Image `png/jpg/jpeg/webp/bmp`이다.

@@ -118,13 +118,76 @@ function getMimeType(filePath: string): string {
     return 'application/octet-stream';
 }
 
-async function protocolHandleFile(filePath: string): Promise<Response> {
+function parseRangeHeader(rangeHeader: string | null, fileSize: number): { start: number; end: number } | null {
+    if (!rangeHeader) return null;
+
+    const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+    if (!match) return null;
+
+    const [, rawStart, rawEnd] = match;
+    if (!rawStart && !rawEnd) return null;
+
+    let start = rawStart ? Number(rawStart) : 0;
+    let end = rawEnd ? Number(rawEnd) : fileSize - 1;
+
+    if (!rawStart && rawEnd) {
+        const suffixLength = Number(rawEnd);
+        if (!Number.isFinite(suffixLength) || suffixLength <= 0) return null;
+        start = Math.max(0, fileSize - suffixLength);
+        end = fileSize - 1;
+    }
+
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    if (start < 0 || end < start || start >= fileSize) return null;
+
+    return { start, end: Math.min(end, fileSize - 1) };
+}
+
+async function readFileRange(filePath: string, start: number, end: number): Promise<Buffer> {
+    const length = end - start + 1;
+    const buffer = Buffer.alloc(length);
+    const handle = await fs.open(filePath, 'r');
+
     try {
+        await handle.read(buffer, 0, length, start);
+    } finally {
+        await handle.close();
+    }
+
+    return buffer;
+}
+
+function bufferToResponseBody(buffer: Buffer): ArrayBuffer {
+    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+}
+
+async function protocolHandleFile(filePath: string, request?: Request): Promise<Response> {
+    try {
+        const stat = await fs.stat(filePath);
+        const mimeType = getMimeType(filePath);
+        const range = parseRangeHeader(request?.headers.get('range') || null, stat.size);
+
+        if (range) {
+            const data = await readFileRange(filePath, range.start, range.end);
+
+            return new Response(bufferToResponseBody(data), {
+                status: 206,
+                headers: {
+                    'accept-ranges': 'bytes',
+                    'content-length': String(data.byteLength),
+                    'content-range': `bytes ${range.start}-${range.end}/${stat.size}`,
+                    'content-type': mimeType
+                }
+            });
+        }
+
         const data = await fs.readFile(filePath);
 
-        return new Response(data, {
+        return new Response(bufferToResponseBody(data), {
             headers: {
-                'content-type': getMimeType(filePath)
+                'accept-ranges': 'bytes',
+                'content-length': String(data.byteLength),
+                'content-type': mimeType
             }
         });
     } catch {
@@ -286,7 +349,7 @@ app.whenReady().then(() => {
             return new Response('Invalid or missing hexx-resource path', { status: 404 });
         }
 
-        return protocolHandleFile(filePath);
+        return protocolHandleFile(filePath, request);
     });
 
     createMainWindow();

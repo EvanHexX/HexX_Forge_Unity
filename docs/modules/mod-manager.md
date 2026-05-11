@@ -347,6 +347,57 @@ type ZipEntryInfo = {
 ## 2026-05-10 Script Builder linked JSON
 
 - `CFG 필드`의 생성 JSON preview는 전역 하단이 아니라 해당 CFG feature card 내부에 둔다.
+- CFG 파일 읽기 버튼으로 파일을 선택하면 `BepInEx 기준 cfg 경로`는 기존 값과 무관하게 `config/{선택한 파일명}`으로 갱신한다.
 - ZIP root 기준 변환으로 표시 경로에 `plugins/`가 붙어도, ZIP 내부 파일 읽기는 원본 `sourceEntryName`을 우선 사용한다.
 - 파일관리 `linkedConfigPath`는 JSON 내용을 즉시 수정하지 않고 metadata와 preview/editor 입력으로만 사용한다.
 - object array JSON은 `file`, `fileName`, `path`, `name`, `id` 후보 key를 `linkedConfigValueKey`로 기록할 수 있다.
+- `files: { "path/file.png": { ...metadata } }` 같은 object map JSON은 `linkedConfigTargetPath`, `linkedConfigFilterKey`, `linkedConfigFilterValue`, `linkedConfigAssetPath`, `linkedConfigSelectedFields` metadata로 대상/필터/등록 asset/입력 필드를 기록한다.
+- 파일관리 linked JSON 필터는 기본값을 자동 강제하지 않는다. 단일 확장자 모드처럼 필터가 필요 없으면 `필터 없음` 상태로 두고, 필요할 때만 사용자가 `type` / `png` 등을 선택한다.
+- ResourceInjector 형식의 `files` object map은 런타임 파일 추가/삭제와 연동한다. 예: `targetDir = plugins/ResourceInjector/portraits/png`, `linkedConfigPath = plugins/ResourceInjector/config/portrait_file_infos.json`이면 `test.png` 추가 시 JSON key는 `files["portraits/png/test.png"]`가 된다.
+- 파일관리 설정 UI는 체크된 metadata field를 사용자 입력으로 받고, 체크 해제된 field는 `linkedConfigFieldDefaults` 값을 고정 기본값으로 기록한다. 삭제 시 managed file과 linked JSON entry를 함께 제거한다.
+- 일반 `.json` 파일은 기본 type을 `config`로 추론한다. `mod-info.json` / `hexx-mod-info.json`만 `mod-info`로 취급한다.
+- mod-info가 없는 ZIP을 패킹 source로 읽으면 생성 예정 `mod-info.json`을 목록에 표시하되, 원본 ZIP에서 복사하지 않고 패킹 시 새로 생성한다.
+- linked JSON은 `linkedConfigTargetPath`와 `linkedConfigKeyTemplate`을 기준으로 entry를 추가/삭제한다. `$` placeholder는 추가 파일명으로 치환한다.
+- linked JSON 대상 path의 UI 표기는 `/` 구분자를 사용한다. 예: `root`, `files`, `files/pngs`. 기존 `files.pngs`처럼 저장된 legacy dot path도 main/renderer에서 계속 읽는다.
+- 파일관리의 `연동 JSON 내용` editor는 접을 수 있으며 기본적으로 접힌 상태로 열린다.
+- JSON key 생성 규칙 입력 후 field preview가 사라지지 않도록, 선택 path의 candidate가 없으면 현재 JSON object map에서 즉시 field 후보를 재구성한다.
+- `연동 배열 JSON path`와 `JSON key 생성 규칙`의 예시는 placeholder가 아니라 Tooltip으로 안내한다. 빈 path는 편집 중 강제로 `root`를 다시 채우지 않고 preview/apply 시 root로 해석한다.
+- 파일관리 script builder의 “등록한 어셋 파일 선택” control은 제거했다. field preview용 파일명은 Step 2 asset 목록에서 확장자가 맞는 첫 파일을 사용하고, 없으면 `test.{extension}`을 사용한다.
+- Electron native dialog 이후 TextField 입력이 잠기는 회귀를 줄이기 위해 PackModDialog는 focus trap/restore를 완화하고 native dialog 종료 후 focus를 정리한다.
+- linked JSON은 UTF-8 BOM 또는 선두 invisible character가 있어도 preview/candidate 추론과 런타임 add/delete에서 정상 parse해야 한다. editor에는 원문을 보존하고 내부 parse에서만 sanitize한다.
+- 모드 설정 저장 시 `configText` 직접 편집 내용은 먼저 저장하고, 이후 file_manager add/delete가 linked JSON 최종 상태를 반영한다. 삭제 버튼은 pending 상태에서 중복 클릭할 수 없다.
+## Package Dependency
+
+- 패키지 단위 종속성은 `mod-info.json` 최상위와 `config/mod_list.json` package metadata의 `dependency` 필드로 기록한다.
+- Schema:
+
+```json
+{
+  "dependency": {
+    "target": "main-mod-catalog-id-or-package-name",
+    "displayName": "Main Mod"
+  }
+}
+```
+
+- 기존 `files[].dependsOn`은 파일 단위 의존성으로 유지한다. 패키지 종속성과 혼동하지 않는다.
+- dependency target 매칭 순서: `source.catalogId` → package `id` → package `name`.
+- 종속 모드 활성화 시 main mod가 없거나 비활성 상태이면 활성화를 차단한다.
+- main mod 비활성화/삭제 시 활성화된 종속 모드가 있으면 먼저 종속 모드를 비활성화하거나 삭제하라는 오류로 차단한다.
+- DLL이 없는 asset-only package도 패키지로 유지한다. 이 경우 `dllPaths: []`와 package-level `enabled` flag로 활성 상태를 저장한다.
+- Mod Manager 목록은 main/root package를 먼저 보여주고, dependent package는 parent 아래 tree row로 들여쓴다. dependency expand state와 collection DLL expand state는 별도로 관리한다.
+
+## Package Version
+
+- `mod-info.json` 최상위 `version`은 모드 패키지 버전이다. 예: `"version": "1.0.0"`.
+- `version`은 local pack/import와 GitHub catalog install 모두 `config/mod_list.json` package metadata에 저장한다.
+- Mod Manager 목록과 상세 Dialog는 package `version`을 표시한다.
+- 온라인 catalog는 `mods/index.json`의 `mods[].version`을 최신 버전으로 보고, 설치된 package `version`과 비교해 update 가능 여부를 계산한다.
+
+## Online Mod Upload Test
+
+1. Mod Packing에서 ZIP을 만들고 version을 입력한다.
+2. repo에 `mods/packages/{modId}/{version}/{modId}.zip` 경로로 ZIP을 추가한다.
+3. `mods/index.json`에 catalog item을 추가하거나 version/downloadPath를 갱신한다.
+4. `downloadPath`는 raw base URL 기준 상대 경로를 쓴다. 예: `mods/packages/sample-mod/1.0.0/sample-mod.zip`.
+5. push 후 앱의 온라인 탭은 `https://raw.githubusercontent.com/EvanHexX/HexX_Forge_Unity/main/mods/index.json`을 읽는다.

@@ -22,6 +22,8 @@ HexX Forge는 Unity 기반 게임의 모드, 폰트, 어셋 패치를 관리하�
 - Font Manager: `docs/modules/font-manager.md`
 - Backup Manager: `docs/modules/backup-manager.md`
 - Optimizer Launcher: `docs/modules/optimizer.md`
+- Game Launch: `docs/modules/game-launch.md`
+- Settings: `docs/modules/settings.md`
 
 ## 현재 상태
 
