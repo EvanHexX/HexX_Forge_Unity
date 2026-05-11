@@ -3,7 +3,10 @@
   "mods": {
     "id": "hexx-resource-injector",
     "name": "특수 초상화 관리모드",
+    "author": "HexX",
+    "description": "Webm, Png, Asset Bundle 을 임포트하여, 특수 초상화로 교체하고 조절할 수 있습니다. 도움: 바나나12349ㄴ",
     "version": "1.3.26",
-    "downloadPath": "mods/packages/hexx-resource-injector/1.3.26/hexx-resource-injector.1.3.26.zip"
+    "downloadPath": "mods/packages/hexx-resource-injector/1.3.26/hexx-resource-injector.1.3.26.zip",
+    "gameIds": "long-yin-li-zhi-zhuan"
   }
 }
