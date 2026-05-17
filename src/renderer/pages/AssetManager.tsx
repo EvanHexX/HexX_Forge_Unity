@@ -665,8 +665,12 @@ export default function AssetManager() {
     );
 
     const genders = useMemo(
-        () => [...new Set(catalog.map((item: AssetCatalogItem) => getCatalogOption1(item)).filter(Boolean))],
-        [catalog]
+        () => [...new Set(catalog
+            .filter((item: AssetCatalogItem) => !selectedType || getCatalogCategory(item) === selectedType)
+            .map((item: AssetCatalogItem) => getCatalogOption1(item))
+            .filter(Boolean)
+        )],
+        [catalog, selectedType]
     );
 
     const filteredItems = useMemo(
@@ -699,9 +703,11 @@ export default function AssetManager() {
     const availablePackTargets = useMemo(
         () => allPackTargets.filter((target) => (
             (!selectedPackId || target.packId === selectedPackId) &&
+            (!selectedType || target.category === selectedType) &&
+            (!selectedGender || getTargetOption1(target) === selectedGender) &&
             (!selectedItem || target.catalogId === selectedItem.id)
         )),
-        [allPackTargets, selectedItem, selectedPackId]
+        [allPackTargets, selectedGender, selectedItem, selectedPackId, selectedType]
     );
 
     const selectedTarget = useMemo(
@@ -742,6 +748,42 @@ export default function AssetManager() {
         setReplacementUrl('');
         setReplacementSize(undefined);
     }, [changeMode, selectedItem, selectedTarget]);
+
+    useEffect(() => {
+        if (changeMode !== 'pack') return;
+
+        if (!selectedPackId) {
+            if (selectedTargetId || replacementPath || replacementUrl) {
+                setSelectedTargetId('');
+                setReplacementPath('');
+                setReplacementUrl('');
+                setReplacementSize(undefined);
+            }
+            return;
+        }
+
+        if (availablePackTargets.length === 0) {
+            if (selectedTargetId || replacementPath || replacementUrl) {
+                setSelectedTargetId('');
+                setReplacementPath('');
+                setReplacementUrl('');
+                setReplacementSize(undefined);
+            }
+            return;
+        }
+
+        if (availablePackTargets.length === 1 && selectedTargetId !== availablePackTargets[0].id) {
+            handleSelectPackTarget(availablePackTargets[0].id);
+            return;
+        }
+
+        if (selectedTargetId && !availablePackTargets.some((target) => target.id === selectedTargetId)) {
+            setSelectedTargetId('');
+            setReplacementPath('');
+            setReplacementUrl('');
+            setReplacementSize(undefined);
+        }
+    }, [availablePackTargets, changeMode, replacementPath, replacementUrl, selectedItem, selectedPackId, selectedTargetId]);
 
     const resetMessages = () => {
         setMessage('');
@@ -813,7 +855,7 @@ export default function AssetManager() {
         packName: target.packName,
         targetId: target.id,
         targetLabel: formatTargetLabel(target),
-        previewUrl: target.previewUrl || target.pngUrl,
+        previewUrl: target.pngUrl || target.previewUrl,
         pngUrl: target.pngUrl,
         appliedAt: new Date().toISOString()
     });
@@ -987,7 +1029,7 @@ export default function AssetManager() {
         setChangeMode('pack');
         setSelectedPackId(target.packId || '');
         setReplacementPath(target.pngPath || '');
-        setReplacementUrl(target.previewUrl || target.pngUrl || matchedCatalog?.previewUrl || '');
+        setReplacementUrl(target.pngUrl || target.previewUrl || matchedCatalog?.previewUrl || '');
         setReplacementSize(target.size);
         setMessage(`적용 대상을 선택했습니다: ${formatTargetLabel(target)}`);
     };
@@ -1311,6 +1353,7 @@ export default function AssetManager() {
                             currentAppliedCount={currentAssetPacks.length}
                             onTypeChange={(value) => {
                                 setSelectedType(value);
+                                setSelectedGender('');
                                 handleSelectItem('');
                             }}
                             onOption1Change={(value) => {
@@ -1631,124 +1674,200 @@ function TexturePanel({
                 : `Catalog 최신 상태: ${catalogSyncStatus.currentVersion || catalogSyncStatus.remoteVersion || 'version 없음'}`
             : `Catalog 상태 확인 실패: ${catalogSyncStatus.error || '알 수 없는 오류'}`
         : '원격 catalog 상태를 아직 확인하지 않았습니다.';
+    const targetSelectValue = availablePackTargets.some((target) => target.id === selectedTargetId)
+        ? selectedTargetId
+        : '';
+    const targetEmptyText = !selectedPackId
+        ? '팩을 선택하세요.'
+        : !selectedItem
+            ? '선택한 필터에 포함된 대상이 이 팩에 없습니다.'
+            : '선택한 원본 대상이 이 팩에 포함되어 있지 않습니다.';
+    const compactFilterWidth = 112;
+    const optionFilterWidth = 150;
+    const wideSelectWidth = 340;
+    const packSelectWidth = compactFilterWidth + optionFilterWidth + 16;
+    const gridTotalWidth = packSelectWidth + wideSelectWidth + 16;
 
     return (
         <>
             <Paper sx={innerPaperSx}>
-                <Typography sx={{ fontWeight: 800, color: 'var(--text-color)' }}>원본 대상 선택</Typography>
-                <Alert
-                    severity={!catalogSyncStatus ? 'info' : catalogSyncStatus.ok === false ? 'warning' : catalogSyncStatus.updateAvailable ? 'info' : 'success'}
-                    sx={{ mt: 2 }}
-                    action={(
-                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                            <Button
-                                size="small"
-                                variant="outlined"
-                                startIcon={catalogSyncLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
-                                onClick={onRefreshCatalogSyncStatus}
-                                disabled={catalogSyncLoading}
-                            >
-                                확인
-                            </Button>
-                            <Button
-                                size="small"
-                                variant="contained"
-                                startIcon={catalogSyncLoading ? <CircularProgress size={14} /> : <SyncIcon />}
-                                onClick={onSyncCatalog}
-                                disabled={catalogSyncLoading || catalogSyncStatus?.ok === false || !catalogSyncStatus?.updateAvailable}
-                            >
-                                Catalog 동기화
-                            </Button>
-                        </Stack>
-                    )}
-                >
-                    {syncStatusText}
-                </Alert>
-                <Stack direction="row" spacing={2} sx={{ mt: 2, flexWrap: 'wrap', rowGap: 2 }}>
-                    <FormControl size="small" sx={{ minWidth: 180 }}>
-                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>종류</InputLabel>
-                        <Select value={selectedType} label="종류" onChange={(e) => onTypeChange(String(e.target.value || ''))} sx={selectSx}>
-                            <MenuItem value="">전체</MenuItem>
-                            {types.map((itemType) => (
-                                <MenuItem key={itemType} value={itemType}>{toKoreanCategory(itemType)}</MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-                    <FormControl size="small" sx={{ minWidth: 180 }}>
-                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>대상 구분</InputLabel>
-                        <Select value={selectedOption1} label="대상 구분" onChange={(e) => onOption1Change(String(e.target.value || ''))} sx={selectSx}>
-                            <MenuItem value="">전체</MenuItem>
-                            {option1Values.map((itemOption1) => (
-                                <MenuItem key={itemOption1} value={itemOption1}>{toTargetGroupLabel(itemOption1)}</MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-                    <FormControl size="small" sx={{ minWidth: 320 }}>
-                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>원본 텍스처</InputLabel>
-                        <Select value={selectedItemId} label="원본 텍스처" onChange={(e) => onItemChange(String(e.target.value || ''))} sx={selectSx}>
-                            <MenuItem value="">선택 안함</MenuItem>
-                            {filteredItems.map((item) => (
-                                <MenuItem key={item.id} value={item.id}>{formatCatalogItemLabel(item)}</MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
+                <Typography sx={{ fontWeight: 800, color: 'var(--text-color)' }}>텍스처 교체 설정</Typography>
+                <Stack direction="row" spacing={2} sx={{ mt: 2, flexWrap: 'wrap', rowGap: 2, alignItems: 'stretch' }}>
+                    <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', rowGap: 2, alignItems: 'center' }}>
+                        <FormControl size="small" sx={{ width: compactFilterWidth }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>종류</InputLabel>
+                            <Select value={selectedType} label="종류" onChange={(e) => onTypeChange(String(e.target.value || ''))} sx={selectSx}>
+                                <MenuItem value="">전체</MenuItem>
+                                {types.map((itemType) => (
+                                    <MenuItem key={itemType} value={itemType}>{toKoreanCategory(itemType)}</MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                        <FormControl size="small" sx={{ width: optionFilterWidth }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>대상 구분</InputLabel>
+                            <Select value={selectedOption1} label="대상 구분" onChange={(e) => onOption1Change(String(e.target.value || ''))} sx={selectSx}>
+                                <MenuItem value="">전체</MenuItem>
+                                {option1Values.map((itemOption1) => (
+                                    <MenuItem key={itemOption1} value={itemOption1}>{toTargetGroupLabel(itemOption1)}</MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                        <FormControl size="small" sx={{ width: wideSelectWidth }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>원본 텍스처</InputLabel>
+                            <Select value={selectedItemId} label="원본 텍스처" onChange={(e) => onItemChange(String(e.target.value || ''))} sx={selectSx}>
+                                <MenuItem value="">선택 안함</MenuItem>
+                                {filteredItems.map((item) => (
+                                    <MenuItem key={item.id} value={item.id}>{formatCatalogItemLabel(item)}</MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                    </Stack>
+                    <Divider orientation="vertical" flexItem sx={{ borderColor: 'var(--border-color)', display: { xs: 'none', md: 'block' } }} />
+                    <Divider sx={{ borderColor: 'var(--border-color)', width: '100%', display: { xs: 'block', md: 'none' } }} />
+                    <Stack direction="row" spacing={1.25} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
+                        <RadioGroup row value={changeMode} onChange={(e) => onModeChange(e.target.value as ChangeMode)}>
+                            <FormControlLabel value="pack" control={<Radio />} label="어셋팩 사용" sx={{ color: 'var(--text-color)' }} />
+                            <FormControlLabel value="direct" control={<Radio />} label="직접 이미지 선택" sx={{ color: 'var(--text-color)' }} />
+                        </RadioGroup>
+                    </Stack>
                 </Stack>
                 {loading && <Typography sx={{ mt: 2, color: 'var(--text-color-light)' }}>카탈로그를 불러오는 중입니다.</Typography>}
-                {currentAppliedLabel && (
-                    <Alert severity="success" sx={{ mt: 2 }}>
-                        {currentAppliedLabel}
-                    </Alert>
-                )}
-            </Paper>
-
-            <Paper sx={innerPaperSx}>
-                <Typography sx={{ fontWeight: 800, color: 'var(--text-color)' }}>변경 방식 선택</Typography>
-                <RadioGroup row value={changeMode} onChange={(e) => onModeChange(e.target.value as ChangeMode)} sx={{ mt: 1 }}>
-                    <FormControlLabel value="pack" control={<Radio />} label="어셋팩 사용" sx={{ color: 'var(--text-color)' }} />
-                    <FormControlLabel value="direct" control={<Radio />} label="직접 이미지 선택" sx={{ color: 'var(--text-color)' }} />
-                </RadioGroup>
-                <Divider sx={{ my: 2, borderColor: 'var(--border-color)' }} />
-                <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', rowGap: 2, alignItems: 'center' }}>
-                    <FormControl size="small" sx={{ minWidth: 260 }}>
-                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>팩 선택</InputLabel>
-                        <Select value={packSelectValue} label="팩 선택" onChange={(e) => onPackChange(String(e.target.value || ''))} sx={selectSx}>
-                            <MenuItem value="">전체</MenuItem>
-                            {replacementPath && <MenuItem value={CUSTOM_PACK_VALUE}>커스텀</MenuItem>}
-                            {packs.map((pack) => <MenuItem key={pack.packId} value={pack.packId}>{pack.packName}</MenuItem>)}
-                        </Select>
-                    </FormControl>
-                    <FormControl size="small" sx={{ minWidth: 360 }}>
-                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>적용 대상</InputLabel>
-                        <Select
-                            value={selectedTargetId}
-                            label="적용 대상"
-                            disabled={changeMode !== 'pack'}
-                            onChange={(e) => onPackTargetChange(String(e.target.value || ''))}
-                            sx={selectSx}
-                        >
-                            <MenuItem value="">선택 안함</MenuItem>
-                            {availablePackTargets.map((target) => (
-                                <MenuItem key={target.id} value={target.id}>{formatTargetLabel(target)}</MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-                    <Button variant="contained" startIcon={<UploadFileIcon />} onClick={onImportPack} sx={containedButtonSx}>어셋팩 추가</Button>
-                    <Button variant="contained" startIcon={<FileDownloadIcon />} onClick={onSelectReplacement} sx={containedButtonSx}>변경 이미지 직접 선택</Button>
-                    <Button
-                        variant="outlined"
-                        startIcon={<RestoreIcon />}
-                        onClick={onClearAppliedPackHistory}
-                        disabled={currentAppliedCount === 0 || applying}
-                        sx={outlinedButtonSx}
-                    >
-                        적용 기록 초기화
-                    </Button>
+                <Stack direction="row" spacing={2} sx={{ mt: 2, flexWrap: 'wrap', rowGap: 2, alignItems: 'center' }}>
+                    {changeMode === 'pack' && (
+                        <>
+                            <FormControl size="small" sx={{ width: packSelectWidth }}>
+                                <InputLabel sx={{ color: 'var(--text-color-light)' }}>팩 선택</InputLabel>
+                                <Select
+                                    value={packSelectValue}
+                                    label="팩 선택"
+                                    onChange={(e) => onPackChange(String(e.target.value || ''))}
+                                    sx={selectSx}
+                                >
+                                    <MenuItem value="">전체</MenuItem>
+                                    {packs.map((pack) => <MenuItem key={pack.packId} value={pack.packId}>{pack.packName}</MenuItem>)}
+                                </Select>
+                            </FormControl>
+                            <FormControl size="small" sx={{ width: wideSelectWidth }}>
+                                <InputLabel sx={{ color: 'var(--text-color-light)' }}>적용 대상</InputLabel>
+                                <Select
+                                    value={targetSelectValue}
+                                    label="적용 대상"
+                                    disabled={!selectedPackId || !selectedItem || availablePackTargets.length === 0}
+                                    onChange={(e) => onPackTargetChange(String(e.target.value || ''))}
+                                    sx={selectSx}
+                                >
+                                    {availablePackTargets.length === 0 && <MenuItem value="">{targetEmptyText}</MenuItem>}
+                                    {availablePackTargets.map((target) => (
+                                        <MenuItem key={target.id} value={target.id}>{formatTargetLabel(target)}</MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                            <Divider orientation="vertical" flexItem sx={{ borderColor: 'var(--border-color)', display: { xs: 'none', md: 'block' } }} />
+                            <Divider sx={{ borderColor: 'var(--border-color)', width: '100%', display: { xs: 'block', md: 'none' } }} />
+                            <Button variant="contained" startIcon={<UploadFileIcon />} onClick={onImportPack} sx={containedButtonSx}>어셋팩 추가</Button>
+                            <Button
+                                variant="outlined"
+                                startIcon={<RestoreIcon />}
+                                onClick={onClearAppliedPackHistory}
+                                disabled={currentAppliedCount === 0 || applying}
+                                sx={outlinedButtonSx}
+                            >
+                                적용 기록 초기화
+                            </Button>
+                        </>
+                    )}
+                    {changeMode === 'direct' && (
+                        <>
+                            <Button variant="contained" startIcon={<FileDownloadIcon />} onClick={onSelectReplacement} sx={containedButtonSx}>변경 이미지 직접 선택</Button>
+                            <Divider orientation="vertical" flexItem sx={{ borderColor: 'var(--border-color)', display: { xs: 'none', md: 'block' } }} />
+                            <Divider sx={{ borderColor: 'var(--border-color)', width: '100%', display: { xs: 'block', md: 'none' } }} />
+                            <Button variant="contained" startIcon={<UploadFileIcon />} onClick={onImportPack} sx={containedButtonSx}>어셋팩 추가</Button>
+                            <Button
+                                variant="outlined"
+                                startIcon={<RestoreIcon />}
+                                onClick={onClearAppliedPackHistory}
+                                disabled={currentAppliedCount === 0 || applying}
+                                sx={outlinedButtonSx}
+                            >
+                                적용 기록 초기화
+                            </Button>
+                            {replacementPath && (
+                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12, wordBreak: 'break-all' }}>
+                                    {replacementPath}
+                                </Typography>
+                            )}
+                        </>
+                    )}
                 </Stack>
-                {selectedPack && changeMode === 'pack' && (
+                <Box
+                    sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        mt: 2,
+                        px: 1.25,
+                        py: 0.65,
+                        border: '1px solid var(--border-color)',
+                        background: 'var(--input-bg-color)',
+                        color: catalogSyncStatus?.ok === false
+                            ? 'var(--accent-color)'
+                            : catalogSyncStatus?.updateAvailable
+                                ? 'var(--primary-color)'
+                                : 'var(--text-color-light)',
+                        fontSize: 12,
+                        minHeight: 34,
+                        width: { xs: '100%', md: gridTotalWidth },
+                        maxWidth: '100%'
+                    }}
+                >
+                    <Typography sx={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+                        {syncStatusText}
+                    </Typography>
+                    <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={catalogSyncLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                        onClick={onRefreshCatalogSyncStatus}
+                        disabled={catalogSyncLoading}
+                        sx={{ ...outlinedButtonSx, minWidth: 72, px: 1 }}
+                    >
+                        확인
+                    </Button>
+                    <Button
+                        size="small"
+                        variant={catalogSyncStatus?.updateAvailable ? 'contained' : 'outlined'}
+                        startIcon={catalogSyncLoading ? <CircularProgress size={14} /> : <SyncIcon />}
+                        onClick={onSyncCatalog}
+                        disabled={catalogSyncLoading || catalogSyncStatus?.ok === false || !catalogSyncStatus?.updateAvailable}
+                        sx={{
+                            ...(catalogSyncStatus?.updateAvailable ? containedButtonSx : outlinedButtonSx),
+                            minWidth: 116,
+                            px: 1
+                        }}
+                    >
+                        Catalog 동기화
+                    </Button>
+                </Box>
+                {changeMode === 'pack' && selectedPack && (
                     <Typography sx={{ mt: 2, color: 'var(--text-color-light)' }}>
                         {selectedPack.author ? `${selectedPack.author} · ` : ''}
                         {selectedPack.description || '설명 없음'}
                     </Typography>
+                )}
+                {changeMode === 'pack' && selectedPackId && selectedItem && availablePackTargets.length === 0 && (
+                    <Typography sx={{ mt: 1.25, color: 'var(--text-color-light)', fontSize: 13 }}>
+                        {targetEmptyText}
+                    </Typography>
+                )}
+                {changeMode === 'pack' && selectedPackId && !selectedItem && (selectedType || selectedOption1) && availablePackTargets.length === 0 && (
+                    <Typography sx={{ mt: 1.25, color: 'var(--text-color-light)', fontSize: 13 }}>
+                        {targetEmptyText}
+                    </Typography>
+                )}
+                {currentAppliedLabel && (
+                    <Alert severity="success" sx={{ mt: 2 }}>
+                        {currentAppliedLabel}
+                    </Alert>
                 )}
             </Paper>
 

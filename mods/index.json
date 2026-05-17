@@ -13,6 +13,22 @@
       "gameIds": [
         "long-yin-li-zhi-zhuan"
       ]
+    },
+    {
+      "id": "UI_Tweek___",
+      "name": "UI Tweek 모드",
+      "author": "HexX",
+      "description": "매니페스트(manifest) 기반의 런타임 에셋 패치 팩 및 런타임 디스플레이 트윅을 위한 별도의 BepInEx IL2CPP 플러그인입니다. 업스케일 어셋 팩에 대비한 모드입니다.",
+      "version": "1.0.0",
+      "downloadPath": "mods/packages/UI_Tweek___/1.0.0/UI_Tweek___.1.0.0.zip",
+      "updatePolicy": {
+        "mode": "replace-confirm",
+        "removeMissing": false
+      },
+      "sha256": "581cd5d8440ff758f420010eb1ef7dc477f9e7fe11141e3f1e5c6aa4174caff2",
+      "gameIds": [
+        "long-yin-li-zhi-zhuan"
+      ]
     }
   ]
 }

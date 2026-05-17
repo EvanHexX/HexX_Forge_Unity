@@ -82,6 +82,14 @@
 - 예방: 배포 생성은 `packages/__tmp-{packId}-{timestamp}`에서 ZIP과 thumbnail을 완성한 뒤 검증에 성공한 경우에만 최종 ZIP/thumbnail/index를 갱신한다. 성공/실패 후 `__pack_staging`과 `__tmp-*`를 정리하고, 배포 catalog 조회는 missing ZIP/thumbnail을 `깨짐` 상태로 표시해야 한다.
 - 추가 증상: 온라인 어셋팩 목록의 작은 thumbnail을 클릭 확대 preview에도 그대로 사용하면 이미지가 흐릿하게 보인다.
 - 예방: catalog item은 목록용 `thumbnailPath`와 확대용 `previewPath`를 분리한다. 생성 도구는 thumbnail을 최대 `420x280`, 대표 preview를 최대 `1920x1080`으로 별도 생성하고, UI는 클릭 확대 시 `previewUrl`을 우선 사용한다.
+- 추가 증상: Asset Manager의 변경 미리보기가 pack target의 저해상도 `previewUrl`을 실제 교체 PNG보다 먼저 사용하면 흐릿하게 보인다.
+- 예방: 변경 미리보기와 현재 적용 pack 기록은 `target.pngUrl`을 우선 사용한다. pack 내부 target preview를 새로 생성할 때도 thumbnail 크기가 아니라 최대 `1920x1080`으로 생성한다.
+
+## 2026-05-17 Asset Manager texture selection UX
+
+- 증상: pack target이 1개뿐이어도 사용자가 다시 `적용 대상`을 선택해야 하고, 후보가 있는 dropdown에 `선택 안함`이 남아 실제 적용 가능한 선택지를 흐릴 수 있다.
+- 예방: `availablePackTargets.length === 1`이면 기존 target 선택 handler로 자동 선택한다. 후보가 있는 경우 `선택 안함` 항목을 숨기고, 후보가 없으면 선택 상태와 replacement preview를 비운 뒤 `선택한 원본 대상이 이 팩에 포함되어 있지 않습니다.`를 표시한다.
+- 직접 이미지 선택 버튼은 `직접 이미지 선택` mode에만 보여야 한다. `어셋팩 사용` mode에 함께 노출되면 pack flow와 direct flow가 섞여 사용자가 잘못된 replacement source를 고를 수 있다.
 
 ## 2026-05-11 Graphics Tool preview parity
 

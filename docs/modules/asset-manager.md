@@ -63,6 +63,9 @@ asset-packs/previews/
 - 네트워크 오류나 원격 manifest 오류가 있어도 기존 local catalog를 계속 사용한다.
 - Asset Pack ZIP import, pack target 선택, 직접 PNG 선택을 지원합니다.
 - 어셋팩 추가 Dialog는 Mod Manager와 같은 온라인/로컬 탭 구조를 사용한다.
+- 텍스처 교체 UI의 `대상 및 어셋팩 선택` 영역은 왼쪽에 원본 대상 필터(`종류`, `대상 구분`, `원본 텍스처`), divider, 오른쪽에 어셋팩 선택(`팩 선택`, `적용 대상`)을 둔다. `Catalog 동기화` 상태는 같은 영역 상단에 유지하고, `어셋팩 추가`와 `적용 기록 초기화`는 그 아래 관리 action row에 둔다.
+- pack target 후보가 1개면 자동 선택하고, 후보가 있으면 `적용 대상` dropdown에서 `선택 안함`을 보여주지 않는다. 후보가 없으면 `선택한 원본 대상이 이 팩에 포함되어 있지 않습니다.` 안내를 표시한다.
+- `변경 이미지 직접 선택` 버튼은 `직접 이미지 선택` mode에서만 표시한다. `어셋팩 사용` mode에서는 pack/target dropdown으로만 replacement를 선택한다.
 - 온라인 어셋팩 catalog 위치는 `asset-packs/index.json`이며, ZIP은 `asset-packs/packages/{packId}/{version}/{packId}.zip` 경로를 사용한다.
 - 온라인 catalog item은 `id`, `name`, `author`, `description`, `version`, `downloadPath`, `thumbnailPath`, `previewPath`, `sha256`, `gameIds`를 지원한다.
 - 온라인에서 설치한 어셋팩은 `pack.json`에 `version`과 `source: { type: "github", catalogId, downloadPath }`를 보존해서 설치/업데이트 상태를 비교한다.
@@ -241,7 +244,8 @@ AssetManager.tsx
 - PNG 기반 배포 생성 시 각 row의 `catalogId`, `category`, `option1`, `option2`, `displayLabel`, `textureName`, `pathId`, `size`, `png`, `preview`를 pack target으로 기록한다. `category=UI` target은 `option2` 없이 생성할 수 있다.
 - 생성은 atomic flow를 사용한다. 먼저 `asset-packs/packages/__tmp-{packId}-{timestamp}`에서 `pack.json`, `files/...`, `previews/...`, ZIP, thumbnail, 대표 preview를 완성하고 검증한 뒤, 성공한 경우에만 최종 `asset-packs/packages/{packId}/{version}/{packId}.zip`, `asset-packs/thumbnails/{packId}.png`, `asset-packs/previews/{packId}.png`로 복사한다.
 - 배포 repo에는 최종 산출물만 남긴다. `__pack_staging`, `__tmp-*`, raw PNG 같은 작업용 파일은 성공/실패와 관계없이 정리 대상이며, `asset-packs/packages/...` 아래에 source asset을 보관하지 않는다.
-- 생성된 ZIP은 `asset-packs/packages/{packId}/{version}/{packId}.zip`으로 저장하고, 각 target preview는 pack 내부 `previews/<category>/..._preview.png`에 최대 `420x280` 크기로 저장한다. ZIP 검증은 `pack.json`, `targets[].png`, `targets[].preview` entry 존재를 확인한다.
+- 생성된 ZIP은 `asset-packs/packages/{packId}/{version}/{packId}.zip`으로 저장하고, 각 target preview는 pack 내부 `previews/<category>/..._preview.png`에 최대 `1920x1080` 크기로 저장한다. ZIP 검증은 `pack.json`, `targets[].png`, `targets[].preview` entry 존재를 확인한다.
+- Asset Manager의 변경 미리보기는 실제 교체 PNG인 `target.pngUrl`을 우선 사용하고, 없을 때만 `target.previewUrl`로 fallback한다.
 - 선택한 thumbnail PNG가 있으면 이를 최대 `420x280` 크기의 catalog thumbnail로 줄여 `asset-packs/thumbnails/{packId}.png`에 저장한다. 선택한 확대 preview PNG가 있으면 이를 최대 `1920x1080` 크기의 대표 preview로 줄여 `asset-packs/previews/{packId}.png`에 저장한다.
 - thumbnail 또는 확대 preview를 직접 지정하지 않으면 첫 번째 target PNG를 각각의 크기로 리사이즈해 생성한다. 기존 pack 수정에서 모든 row가 유지 상태이면 기존 ZIP의 첫 번째 target PNG를 사용한다.
 - 어셋팩 배포 도구는 `asset-packs/index.json`을 생성/갱신하고 ZIP의 `sha256`을 catalog item에 기록한다. 생성된 `asset-packs` 하위 파일은 개발자가 확인 후 커밋한다.

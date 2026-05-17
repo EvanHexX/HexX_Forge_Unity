@@ -31,11 +31,11 @@ backup/restore operations, and release updates through GitHub Releases.
 
 ### Current status
 
-- The current release is a Windows x64 beta prerelease: `v1.15.3-beta.0`.
+- The current release is a Windows x64 beta prerelease: `v1.16.0-beta.0`.
 - The current primary supported game is `LongYinLiZhiZhuan`.
-- This beta focuses on Visual Forge stabilization and release packaging checks.
+- This beta focuses on ASAR-packaged release validation, Asset Forge distribution updates, and Visual Forge stability checks.
 - Core Lab and Synthesis Lab are visible placeholder workspaces for planned features.
-- ASAR packaging is intentionally disabled for this beta and will be validated in a follow-up build.
+- ASAR packaging is enabled for app code. External tools and runtime resources remain outside ASAR through `extraResources`.
 - Code signing is not configured yet, so Windows SmartScreen may warn on first launch.
 - Settings already use `selectedGameId` and `gamePaths` so additional games can be added later.
 - `gamePath` is still preserved for compatibility with earlier configuration files.
@@ -66,7 +66,7 @@ backup/restore operations, and release updates through GitHub Releases.
 - TODO tracking: [`docs/TODO.md`](docs/TODO.md)
 - Regression notes: [`docs/regression.md`](docs/regression.md)
 - Update flow: [`docs/modules/update-manager.md`](docs/modules/update-manager.md)
-- Release notes: [`docs/release-notes/visual-forge-stabilization-beta.md`](docs/release-notes/visual-forge-stabilization-beta.md)
+- Release notes: [`docs/release-notes/1.16.0-beta.0.md`](docs/release-notes/1.16.0-beta.0.md)
 - Asset Forge details: [`docs/modules/asset-manager.md`](docs/modules/asset-manager.md)
 - Mod Forge details: [`docs/modules/mod-manager.md`](docs/modules/mod-manager.md)
 - Visual Forge details: [`docs/modules/graphics-tool.md`](docs/modules/graphics-tool.md)
@@ -92,11 +92,11 @@ Unity asset 교체, 백업/복원, GitHub Releases 기반 업데이트 흐름을
 
 ### 현재 상태
 
-- 현재 릴리즈는 Windows x64 베타 prerelease인 `v1.15.3-beta.0`입니다.
+- 현재 릴리즈는 Windows x64 베타 prerelease인 `v1.16.0-beta.0`입니다.
 - 현재 주 지원 게임은 `용윤입지전`입니다.
-- 이번 베타는 Visual Forge 안정화와 릴리즈 패키징 검증에 초점을 둡니다.
+- 이번 베타는 ASAR 패키징 릴리즈 검증, Asset Forge 배포 업데이트, Visual Forge 안정성 확인에 초점을 둡니다.
 - Core Lab과 Synthesis Lab은 구현 예정 기능을 보여주는 placeholder 작업 공간입니다.
-- ASAR 패키징은 이번 베타에서 의도적으로 비활성화되어 있으며 후속 빌드에서 별도 검증합니다.
+- ASAR 패키징은 앱 코드에 활성화되어 있습니다. 외부 실행 도구와 runtime resources는 `extraResources`를 통해 ASAR 밖에 유지합니다.
 - 코드 서명은 아직 구성되지 않아 Windows SmartScreen 경고가 표시될 수 있습니다.
 - 설정은 향후 게임 확장을 위해 `selectedGameId`와 `gamePaths` 구조를 사용합니다.
 - 이전 설정 파일과의 호환을 위해 `gamePath` 값도 유지합니다.
@@ -127,7 +127,7 @@ Unity asset 교체, 백업/복원, GitHub Releases 기반 업데이트 흐름을
 - TODO tracking: [`docs/TODO.md`](docs/TODO.md)
 - Regression notes: [`docs/regression.md`](docs/regression.md)
 - Update flow: [`docs/modules/update-manager.md`](docs/modules/update-manager.md)
-- 릴리즈 노트: [`docs/release-notes/visual-forge-stabilization-beta.md`](docs/release-notes/visual-forge-stabilization-beta.md)
+- 릴리즈 노트: [`docs/release-notes/1.16.0-beta.0.md`](docs/release-notes/1.16.0-beta.0.md)
 - Asset Forge 상세: [`docs/modules/asset-manager.md`](docs/modules/asset-manager.md)
 - Mod Forge 상세: [`docs/modules/mod-manager.md`](docs/modules/mod-manager.md)
 - Visual Forge 상세: [`docs/modules/graphics-tool.md`](docs/modules/graphics-tool.md)
@@ -153,11 +153,11 @@ BepInEx Mod 包、Unity asset 替换、备份/恢复操作，以及基于 GitHub
 
 ### 当前状态
 
-- 当前版本是 Windows x64 beta prerelease：`v1.15.3-beta.0`。
+- 当前版本是 Windows x64 beta prerelease：`v1.16.0-beta.0`。
 - 当前主要支持的游戏是 `龙胤立志传`。
-- 本次 beta 重点是 Visual Forge 稳定化和发布包验证。
+- 本次 beta 重点是 ASAR 打包发布验证、Asset Forge 分发更新和 Visual Forge 稳定性检查。
 - Core Lab 和 Synthesis Lab 是用于展示计划功能的 placeholder 工作区。
-- 本次 beta 有意禁用 ASAR 打包，并将在后续构建中单独验证。
+- 应用代码已启用 ASAR 打包。外部工具和运行时资源会通过 `extraResources` 保留在 ASAR 外部。
 - 尚未配置代码签名，因此 Windows SmartScreen 可能会在首次启动时提示警告。
 - 设置已经使用 `selectedGameId` 和 `gamePaths`，方便后续扩展更多游戏。
 - 为了兼容旧配置文件，仍然保留 `gamePath`。
@@ -188,7 +188,7 @@ BepInEx Mod 包、Unity asset 替换、备份/恢复操作，以及基于 GitHub
 - TODO tracking：[`docs/TODO.md`](docs/TODO.md)
 - Regression notes：[`docs/regression.md`](docs/regression.md)
 - Update flow：[`docs/modules/update-manager.md`](docs/modules/update-manager.md)
-- Release notes：[`docs/release-notes/visual-forge-stabilization-beta.md`](docs/release-notes/visual-forge-stabilization-beta.md)
+- Release notes：[`docs/release-notes/1.16.0-beta.0.md`](docs/release-notes/1.16.0-beta.0.md)
 - Asset Forge 详情：[`docs/modules/asset-manager.md`](docs/modules/asset-manager.md)
 - Mod Forge 详情：[`docs/modules/mod-manager.md`](docs/modules/mod-manager.md)
 - Visual Forge 详情：[`docs/modules/graphics-tool.md`](docs/modules/graphics-tool.md)

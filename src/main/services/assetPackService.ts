@@ -18,6 +18,7 @@ const CATALOG_INDEX_URL = `${CATALOG_BASE_URL}/asset-packs/index.json`;
 const DISTRIBUTION_ROOT = path.join(process.cwd(), 'asset-packs');
 const THUMBNAIL_MAX_SIZE = { width: 420, height: 280 };
 const PREVIEW_MAX_SIZE = { width: 1920, height: 1080 };
+const TARGET_PREVIEW_MAX_SIZE = { width: 1920, height: 1080 };
 
 type SizeTuple = [number, number];
 
@@ -614,13 +615,23 @@ function buildPackZipFromTargets(input: AssetPackDistributionInput, workDir: str
 
             if (target.pngPath) {
                 copyPackSourceFile(target.pngPath, path.join(stagingDir, pngRelativePath));
-                writeThumbnail(target.previewPath || target.pngPath, path.join(stagingDir, previewRelativePath));
+                writeResizedPng(
+                    target.previewPath || target.pngPath,
+                    path.join(stagingDir, previewRelativePath),
+                    [TARGET_PREVIEW_MAX_SIZE.width, TARGET_PREVIEW_MAX_SIZE.height],
+                    'target preview'
+                );
             } else {
                 copyZipEntry(target.existingZipPath!, target.existingPng!, path.join(stagingDir, pngRelativePath));
                 if (target.existingPreview) {
                     copyZipEntry(target.existingZipPath!, target.existingPreview, path.join(stagingDir, previewRelativePath));
                 } else {
-                    writeThumbnail(path.join(stagingDir, pngRelativePath), path.join(stagingDir, previewRelativePath));
+                    writeResizedPng(
+                        path.join(stagingDir, pngRelativePath),
+                        path.join(stagingDir, previewRelativePath),
+                        [TARGET_PREVIEW_MAX_SIZE.width, TARGET_PREVIEW_MAX_SIZE.height],
+                        'target preview'
+                    );
                 }
             }
 

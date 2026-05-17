@@ -184,7 +184,7 @@ export default function Home({ onOpenSettings }: Props) {
                     <Stack direction="row" spacing={1.25} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
                         <Typography variant="h4" sx={{ fontWeight: 900, color: 'var(--text-color-light)' }}>
                             <ShinyText
-                                text="HexX Forge" speed={4.8}/> v{version || '1.15.3-beta.0'}
+                                text="HexX Forge" speed={4.8}/> v{version || '1.16.0-beta.0'}
                         </Typography>
                         <Chip
                             size="small"

@@ -248,6 +248,35 @@
         "installBase": "plugins/ResourceInjector/packs"
       },
       "version": "1.0.0"
+    },
+    "1d8434b2-bda7-4bb4-b8c9-0c7495ec751f": {
+      "id": "1d8434b2-bda7-4bb4-b8c9-0c7495ec751f",
+      "name": "UI Tweek 모드",
+      "author": "HexX",
+      "description": "UI 어셋의 사이즈 변경에 대비하여, ingame scale 및 DOTween 작동방식에 관여합니다.",
+      "packageType": "single",
+      "dllPaths": [
+        "plugins/ResourcePatchKit.dll"
+      ],
+      "files": [
+        {
+          "path": "plugins/ResourcePatchKit.dll",
+          "type": "dll",
+          "name": "ResourcePatchKit",
+          "author": "HexX"
+        },
+        {
+          "path": "settings.configurator.json",
+          "type": "script",
+          "dependsOn": "modpack"
+        }
+      ],
+      "enabled": false,
+      "updatePolicy": {
+        "mode": "overwrite",
+        "removeMissing": false
+      },
+      "version": "0.1.17"
     }
   },
   "mods": {
@@ -255,6 +284,13 @@
       "name": "ResourceInjector.dll",
       "author": "sdfg",
       "packageId": "2eb14d6d-999a-44a0-9f65-764b485ec99f"
+    },
+    "plugins/ResourcePatchKit.dll": {
+      "name": "ResourcePatchKit",
+      "author": "HexX",
+      "description": "UI 어셋의 사이즈 변경에 대비하여, ingame scale 및 DOTween 작동방식에 관여합니다.",
+      "packageId": "1d8434b2-bda7-4bb4-b8c9-0c7495ec751f",
+      "version": "0.1.17"
     }
   }
 }
