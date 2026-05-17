@@ -4,13 +4,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getAppSettings, readJsonFile, writeJsonFile } from './configService';
-import { getBundledStoragePath, getConfigPath, getResourcePath, getStoragePath } from './runtimePaths';
+import { getBundledStoragePath, getConfigPath, getResourcePath, getStoragePath, getWritableConfigDir } from './runtimePaths';
 
 const CONFIG_PATH = getConfigPath('asset_config.json');
 const BACKUP_ROOT = getStoragePath('backups');
 const ASSET_CATALOG_PATH = getConfigPath('asset_catalog.json');
 const TEXTURE_CATALOG_PATH = getConfigPath('texture_catalog.csv');
 const CURRENT_FONTS_PATH = getConfigPath('current_fonts.json');
+const CURRENT_ASSET_PACKS_PATH = getConfigPath('current_asset_packs.json');
 const FONT_METADATA_PATH = getResourcePath('tools', 'AssetManager', 'metadata', 'fonts_data.tsv');
 const FONT_ORIGINALS_DIR = path.join(
     getResourcePath('tools', 'AssetManager', 'originals'),
@@ -26,7 +27,7 @@ type SizeTuple = [number, number];
 
 type AssetCatalogItem = {
     id: string;
-    gender: string;
+    gender?: string;
     /**
      * legacy 필드입니다. 기존 JSON에서는 type에 outfit/body 같은 category 값이 들어가 있었습니다.
      * 신규 구조에서는 category를 우선 사용하고, type은 하위호환용으로만 둡니다.
@@ -34,8 +35,14 @@ type AssetCatalogItem = {
     type?: string;
     /** API request.category로 전달되는 값입니다. 예: outfit, body, face, building */
     category?: string;
+    /** API request.option1로 전달되는 값입니다. 기존 의상에서는 gender였고 UI asset에서는 대상 구분입니다. */
+    option1?: string;
+    /** 사용자에게 option1을 보여줄 때 우선 사용하는 라벨입니다. */
+    option1Label?: string;
     /** API request.option2로 전달되는 값입니다. 예: 천산파, 개방, 캐릭터명 */
     option2?: string;
+    /** 드랍다운과 미리보기 caption에서 우선 사용하는 표시명입니다. */
+    displayLabel?: string;
     label: string;
     textureName: string;
     pathId: number;
@@ -94,6 +101,34 @@ type FontListItem = {
     fontFileName?: string;
 };
 
+type AssetCatalogFile = {
+    schemaVersion?: number;
+    items: AssetCatalogItem[];
+};
+
+type CurrentAssetPackEntry = {
+    catalogId: string;
+    category?: string;
+    option1?: string;
+    option2?: string;
+    textureName?: string;
+    pathId?: number;
+    packId: string;
+    packName: string;
+    targetId?: string;
+    targetLabel?: string;
+    previewUrl?: string;
+    pngUrl?: string;
+    appliedAt: string;
+};
+
+type CurrentAssetPacksFile = {
+    schemaVersion: number;
+    gameId: string;
+    updatedAt: string;
+    targets: CurrentAssetPackEntry[];
+};
+
 /**
  * catalog preview 상대 경로를 renderer에서 안전하게 로딩할 custom protocol URL로 변환합니다.
  * file:// URL은 Electron renderer에서 차단될 수 있으므로 사용하지 않습니다.
@@ -101,6 +136,41 @@ type FontListItem = {
 function toPreviewProtocolUrl(relativePath: string): string {
     const normalized = relativePath.replaceAll('\\', '/');
     return `hexx-resource://preview/${encodeURIComponent(normalized).replaceAll('%2F', '/')}`;
+}
+
+function sanitizePathSegment(value: string): string {
+    return value
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/\s+/g, '_')
+        .trim() || 'asset';
+}
+
+function normalizeCatalogItem(item: AssetCatalogItem): AssetCatalogItem {
+    const category = item.category || item.type || '';
+    const option1 = item.option1 || item.gender || '';
+
+    return {
+        ...item,
+        category,
+        option1,
+        gender: item.gender || option1,
+        type: category
+    };
+}
+
+function isUiCategory(value: string): boolean {
+    return value.trim().toLowerCase() === 'ui';
+}
+
+function readAssetCatalogFile(): AssetCatalogFile {
+    const catalog = readJsonFile<AssetCatalogFile>(ASSET_CATALOG_PATH, {
+        items: []
+    });
+
+    return {
+        ...catalog,
+        items: (catalog.items || []).map(normalizeCatalogItem)
+    };
 }
 
 /**
@@ -149,22 +219,161 @@ function readPngSize(filePath: string): SizeTuple {
  * 실제 패치 기준은 Python data.tsv이지만, UI 정렬/최소검증/미리보기에는 이 JSON을 사용합니다.
  */
 export function getAssetCatalog() {
-    const catalog = readJsonFile<{ items: AssetCatalogItem[] }>(ASSET_CATALOG_PATH, {
-        items: []
-    });
+    const catalog = readAssetCatalogFile();
 
     return {
         items: catalog.items.map((item) => {
-            const category = item.category || item.type || '';
-
             return {
                 ...item,
-                category,
-                // 기존 UI hook이 item.type을 보고 있을 수 있으므로 category 값을 type에도 유지합니다.
-                type: category,
                 previewUrl: item.preview ? toPreviewProtocolUrl(item.preview) : ''
             };
         })
+    };
+}
+
+export function getCatalogEditorData() {
+    return getAssetCatalog();
+}
+
+function validateCatalogItem(item: AssetCatalogItem, index: number): AssetCatalogItem {
+    const normalized = normalizeCatalogItem(item);
+    const required: Array<[keyof AssetCatalogItem, string]> = [
+        ['id', 'id'],
+        ['category', 'category'],
+        ['option1', 'option1'],
+        ['textureName', 'textureName']
+    ];
+
+    if (!isUiCategory(normalized.category || '')) {
+        required.push(['option2', 'option2']);
+    }
+
+    for (const [field, name] of required) {
+        if (!String(normalized[field] || '').trim()) {
+            throw new Error(`asset_catalog.json items[${index}].${name} 값이 없습니다.`);
+        }
+    }
+
+    if (!Number.isFinite(Number(normalized.pathId))) {
+        throw new Error(`asset_catalog.json items[${index}].pathId 값이 올바르지 않습니다.`);
+    }
+
+    if (
+        !Array.isArray(normalized.size) ||
+        normalized.size.length !== 2 ||
+        !Number.isFinite(Number(normalized.size[0])) ||
+        !Number.isFinite(Number(normalized.size[1]))
+    ) {
+        throw new Error(`asset_catalog.json items[${index}].size 값은 [width, height] 형식이어야 합니다.`);
+    }
+
+    return {
+        ...normalized,
+        id: normalized.id.trim(),
+        category: normalized.category?.trim(),
+        type: normalized.category?.trim(),
+        option1: normalized.option1?.trim(),
+        gender: normalized.gender?.trim() || normalized.option1?.trim(),
+        option1Label: normalized.option1Label?.trim() || normalized.option1?.trim(),
+        option2: normalized.option2?.trim(),
+        displayLabel: normalized.displayLabel?.trim() || normalized.label?.trim(),
+        label: normalized.label?.trim() || normalized.displayLabel?.trim() || normalized.id.trim(),
+        textureName: normalized.textureName.trim(),
+        pathId: Number(normalized.pathId),
+        size: [Number(normalized.size[0]), Number(normalized.size[1])]
+    };
+}
+
+export function saveCatalogEditorData(catalog: AssetCatalogFile) {
+    const items = (catalog.items || []).map(validateCatalogItem);
+    const nextCatalog: AssetCatalogFile = {
+        ...catalog,
+        schemaVersion: Math.max(2, Number(catalog.schemaVersion || 2)),
+        items
+    };
+
+    writeJsonFile(ASSET_CATALOG_PATH, nextCatalog);
+    return getAssetCatalog();
+}
+
+export function getCurrentAssetPacks(): CurrentAssetPacksFile {
+    return readJsonFile<CurrentAssetPacksFile>(CURRENT_ASSET_PACKS_PATH, {
+        schemaVersion: 1,
+        gameId: getAppSettings().selectedGameId,
+        updatedAt: '',
+        targets: []
+    });
+}
+
+export function saveCurrentAssetPacks(entries: CurrentAssetPackEntry[]) {
+    const current = getCurrentAssetPacks();
+    const nextByCatalogId = new Map<string, CurrentAssetPackEntry>();
+
+    for (const entry of current.targets || []) {
+        if (entry.catalogId) nextByCatalogId.set(entry.catalogId, entry);
+    }
+
+    for (const entry of entries) {
+        if (!entry.catalogId || !entry.packId) continue;
+        nextByCatalogId.set(entry.catalogId, {
+            ...entry,
+            appliedAt: entry.appliedAt || new Date().toISOString()
+        });
+    }
+
+    const next: CurrentAssetPacksFile = {
+        schemaVersion: 1,
+        gameId: getAppSettings().selectedGameId,
+        updatedAt: new Date().toISOString(),
+        targets: [...nextByCatalogId.values()]
+    };
+
+    writeJsonFile(CURRENT_ASSET_PACKS_PATH, next);
+    return next;
+}
+
+export function clearCurrentAssetPacks() {
+    const next: CurrentAssetPacksFile = {
+        schemaVersion: 1,
+        gameId: getAppSettings().selectedGameId,
+        updatedAt: new Date().toISOString(),
+        targets: []
+    };
+
+    writeJsonFile(CURRENT_ASSET_PACKS_PATH, next);
+    return next;
+}
+
+export async function importCatalogPreviewImage(params: { id?: string; category?: string } = {}) {
+    const { dialog } = await import('electron');
+
+    const result = await dialog.showOpenDialog({
+        title: '원본 미리보기 PNG 선택',
+        properties: ['openFile'],
+        filters: [
+            { name: 'PNG Image', extensions: ['png'] }
+        ]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+        return null;
+    }
+
+    const sourcePath = result.filePaths[0];
+    const size = readPngSize(sourcePath);
+    const category = sanitizePathSegment(params.category || 'uncategorized');
+    const id = sanitizePathSegment(params.id || path.parse(sourcePath).name);
+    const preview = path.join('resources', 'previews', category, `${id}_preview.png`).replaceAll('\\', '/');
+    const targetPath = path.join(getWritableConfigDir(), preview);
+
+    ensureDir(path.dirname(targetPath));
+    fs.copyFileSync(sourcePath, targetPath);
+
+    return {
+        preview,
+        path: targetPath,
+        url: toPreviewProtocolUrl(preview),
+        size
     };
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "hexx-forge-unity",
-  "version": "1.15.3-beta.0",
+  "version": "1.15.3-beta.2",
   "description": "HexX Forge - Unity game mod and asset manager",
   "main": "dist/main/main.js",
   "scripts": {
@@ -27,7 +27,7 @@
       "buildResources": "build"
     },
     "afterPack": "scripts/after-pack-win-icon.cjs",
-    "asar": false,
+    "asar": true,
     "files": [
       "dist/**/*",
       "package.json"
@@ -40,6 +40,13 @@
           "**/*",
           "!app_settings",
           "!app_settings.json"
+        ]
+      },
+      {
+        "from": "docs/manuals",
+        "to": "docs/manuals",
+        "filter": [
+          "**/*.md"
         ]
       },
       {

@@ -25,6 +25,17 @@ HexX Forge는 Unity 기반 게임의 모드, 폰트, 어셋 패치를 관리하�
 - Game Launch: `docs/modules/game-launch.md`
 - Settings: `docs/modules/settings.md`
 
+## 사용자 매뉴얼
+
+Home 카드의 `상세 설명 보기`는 개발자용 모듈 문서가 아니라 아래 사용자 매뉴얼을 기준으로 연결합니다.
+
+- Mod Forge: `docs/manuals/mod-forge.md`
+- Asset Forge: `docs/manuals/asset-forge.md`
+- Visual Forge: `docs/manuals/visual-forge.md`
+- Core Lab: `docs/manuals/core-lab.md`
+- Synthesis Lab: `docs/manuals/synthesis-lab.md`
+- Settings: `docs/manuals/settings.md`
+
 ## 현재 상태
 
 - Electron + React 기반 UI

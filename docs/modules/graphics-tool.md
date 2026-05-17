@@ -7,6 +7,15 @@
 - Image Tool `Background alpha`는 preview와 export가 같은 key color/tolerance/softness 기준을 사용한다.
 - `config/graphics_presets.json`의 filter/color preset labels는 UI에 직접 노출되므로 `en`, `ko`, `zh-CN` 문자열을 UTF-8로 유지한다.
 
+## 2026-05-16 Chroma Key Export / Preview Policy
+
+- Video Tool export의 portrait 합성 base는 `nullsrc`가 아니라 `color=c=black@0,format=rgba` 투명 source를 사용한다.
+- Chroma Key: Advanced preview는 Shotcut `select0r`의 `shape`, `edge`, `operation`, `invert` 값을 alpha 조합에 반영한다. export는 bundled frei0r `select0r`가 source of truth이며 preview는 interactive 근사다.
+- `Slope` slider는 Shotcut UI와 동일하게 `Edge` 종류와 상관없이 항상 표시한다. 다만 preview에서 edge mode별 영향은 Shotcut/frei0r 의미에 맞춰 다르게 근사한다.
+- brush mask preview는 `1200 x 1500` portrait mask를 현재 media transform/source aspect ratio에 맞춰 잘라 source-local preview canvas로 매핑한다. 단순 전체 scale로 되돌리면 transform이 들어간 소스에서 마스크 위치가 어긋난다.
+- Alpha Channel: Adjust preview는 chroma/key spill 이후 alpha buffer에 mode별 approximation을 적용한다. shrink/grow/blur 계열은 주변 alpha sampling으로 근사하고, export는 main process의 native FFmpeg alpha `lut` approximation을 따른다.
+- Video/Image Tool layout은 content 최대 폭을 두고, 넓은 창에서는 preview/editor 영역 왼쪽과 filter/settings 영역 오른쪽의 2-column 구성을 유지한다. 화면 폭이 충분히 넓으면 `Object Transform`과 `Canvas Overlay Settings`를 오른쪽 컬럼 안에서 나란히 배치하고, filter section은 전체 오른쪽 컬럼 폭을 사용해 내부 filter cards를 2-column으로 재배치한다.
+
 ## 2026-05-11 Seek-Then-Play Policy
 
 - `VideoPreviewController.seek(seconds)`는 `Promise<void>`를 반환한다.

@@ -28,7 +28,7 @@ function parseJsonText<T>(text: string, fallback?: T): T {
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export type ModFileType = 'dll' | 'asset' | 'mod-info' | 'script' | 'config' | 'folder';
+export type ModFileType = 'dll' | 'asset' | 'mod-info' | 'script' | 'config' | 'folder' | 'readme';
 
 export type ModFileInfo = {
     path: string;
@@ -74,6 +74,7 @@ export type ModPackage = {
     enabled: boolean | 'mixed';
     dlls: DllEntry[];
     hasSettings: boolean;
+    readmePath?: string;
     dependency?: PackageDependency;
     dependencyState?: 'ok' | 'missing' | 'disabled';
     dependencyParentId?: string;
@@ -242,7 +243,7 @@ type HexXModInfoFile = {
 
 type PackModSource = {
     sourcePath: string;
-    sourceKind: 'dll' | 'zip';
+    sourceKind: 'dll' | 'zip' | 'file';
     name: string;
     author: string;
     description?: string;
@@ -540,6 +541,7 @@ function suggestFileType(entryName: string, isDirectory: boolean): ModFileType {
 
     if (base === 'mod-info.json' || base === 'hexx-mod-info.json') return 'mod-info';
     if (lower.endsWith('.dll')) return 'dll';
+    if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'readme';
     if (lower.endsWith('.cfg')) return 'config';
     if (/\.(png|jpg|jpeg|gif|webp|webm|bmp|tga|tiff)$/.test(lower)) return 'asset';
     if (lower.endsWith('.json')) return 'config';
@@ -572,7 +574,7 @@ function sanitizePackageDependency(dependency?: PackageDependency): PackageDepen
 
 function getDeployRelativePath(pkgMeta: PackageMeta, file: Pick<ModFileInfo, 'path' | 'type'>): string {
     const normalizedPath = normalizeRelativePath(file.path).replace(/\/+$/, '');
-    if (file.type !== 'script' && file.type !== 'mod-info' && file.type !== 'dll' && !isBepInExRootedPath(normalizedPath)) {
+    if (file.type !== 'script' && file.type !== 'mod-info' && file.type !== 'dll' && file.type !== 'readme' && !isBepInExRootedPath(normalizedPath)) {
         const installBase = getPackageInstallBase(pkgMeta);
         if (installBase) return normalizeRelativePath(path.posix.join(installBase, normalizedPath));
     }
@@ -683,6 +685,7 @@ export function scanMods(): ModPackage[] {
         const enabled = getPackageEnabledFromMeta(pkgMeta, dlls);
 
         const hasSettings = pkgMeta.files.some((f) => f.type === 'script' || f.type === 'config');
+        const readmePath = pkgMeta.files.find((f) => f.type === 'readme')?.path;
         const dependency = resolvePackageDependency(modListFile, pkgMeta, packageDllsMap);
 
         packages.push({
@@ -694,6 +697,7 @@ export function scanMods(): ModPackage[] {
             enabled,
             dlls: dlls.sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
             hasSettings,
+            readmePath,
             dependency: pkgMeta.dependency,
             dependencyState: dependency.state,
             dependencyParentId: dependency.parentId,
@@ -1305,6 +1309,169 @@ function addUniqueZipFile(zip: AdmZip, entryName: string, data: Buffer): string 
     return candidate;
 }
 
+function addExactZipFile(zip: AdmZip, entryName: string, data: Buffer): void {
+    const normalizedName = normalizeRelativePath(entryName).replace(/^\/+/, '');
+    if (!normalizedName || zip.getEntry(normalizedName)) return;
+    zip.addFile(normalizedName, data);
+}
+
+function findExistingPath(candidates: string[]): string {
+    return candidates.find((candidate) => candidate && fs.existsSync(candidate)) ?? '';
+}
+
+function getExportSavePath(savePath: string): string {
+    return savePath.toLowerCase().endsWith('.zip') ? savePath : `${savePath}.zip`;
+}
+
+function createExportMissingError(missingPaths: string[]): Error {
+    const unique = [...new Set(missingPaths)];
+    const preview = unique.slice(0, 8).join(', ');
+    const suffix = unique.length > 8 ? ` 외 ${unique.length - 8}개` : '';
+    return new Error(`내보낼 원본 파일을 찾을 수 없습니다: ${preview}${suffix}`);
+}
+
+export function exportPackage(packageId: string, savePath: string): string {
+    ensureDirs();
+
+    const modListFile = readModListFile();
+    const zip = new AdmZip();
+    const missingPaths: string[] = [];
+    const exportedFiles: NonNullable<HexXModInfoFile['files']> = [];
+    const exportedPathKeys = new Set<string>();
+
+    const pushInfoFile = (file: NonNullable<HexXModInfoFile['files']>[number]) => {
+        const normalizedPath = normalizeRelativePath(file.path).replace(/\/+$/, '');
+        if (!normalizedPath) return;
+        const key = `${normalizedPath.toLowerCase()}::${file.type ?? ''}`;
+        if (exportedPathKeys.has(key)) return;
+        exportedPathKeys.add(key);
+        exportedFiles.push({ ...file, path: normalizedPath });
+    };
+
+    const addDll = (dllPath: string, fileMeta?: ModFileInfo) => {
+        const normalizedPath = normalizeRelativePath(dllPath);
+        const sourcePath = findExistingPath([
+            ...getActiveDllPathCandidates(normalizedPath),
+            ...getDisabledDllPathCandidates(normalizedPath),
+        ]);
+        if (!sourcePath) {
+            missingPaths.push(normalizedPath);
+            return;
+        }
+        addExactZipFile(zip, normalizedPath, fs.readFileSync(sourcePath));
+        pushInfoFile({
+            path: normalizedPath,
+            type: 'dll',
+            name: fileMeta?.name,
+            author: fileMeta?.author,
+            dependsOn: fileMeta?.dependsOn,
+        });
+    };
+
+    let modInfo: HexXModInfoFile;
+    const packageMeta = modListFile.packages[packageId];
+
+    if (packageMeta) {
+        const pkgDir = path.join(PACKAGES_DIR, packageId);
+        const dllFilePaths = new Set<string>();
+
+        for (const file of packageMeta.files) {
+            const normalizedPath = normalizeRelativePath(file.path).replace(/\/+$/, '');
+            if (!normalizedPath) continue;
+
+            if (file.type === 'mod-info') continue;
+            if (file.type === 'folder') {
+                pushInfoFile({
+                    path: normalizedPath,
+                    type: 'folder',
+                    name: file.name,
+                    author: file.author,
+                    dependsOn: file.dependsOn,
+                });
+                continue;
+            }
+            if (file.type === 'dll') {
+                dllFilePaths.add(normalizedPath);
+                addDll(normalizedPath, file);
+                continue;
+            }
+
+            const sourcePath = path.join(pkgDir, normalizedPath);
+            if (!fs.existsSync(sourcePath)) {
+                missingPaths.push(normalizedPath);
+                continue;
+            }
+            addExactZipFile(zip, normalizedPath, fs.readFileSync(sourcePath));
+            pushInfoFile({
+                path: normalizedPath,
+                type: file.type,
+                name: file.name,
+                author: file.author,
+                dependsOn: file.dependsOn,
+            });
+        }
+
+        for (const dllPath of packageMeta.dllPaths) {
+            const normalizedPath = normalizeRelativePath(dllPath);
+            if (dllFilePaths.has(normalizedPath)) continue;
+            addDll(normalizedPath);
+        }
+
+        modInfo = {
+            name: packageMeta.name,
+            author: packageMeta.author,
+            description: packageMeta.description,
+            packageType: packageMeta.packageType,
+            version: packageMeta.version,
+            dependency: sanitizePackageDependency(packageMeta.dependency),
+            files: exportedFiles,
+        };
+    } else {
+        const relativePath = normalizeRelativePath(packageId);
+        const legacyPath = toLegacyDllRelativePath(relativePath);
+        const enabledPath = toEnabledDllRelativePath(relativePath);
+        const meta =
+            modListFile.mods[relativePath] ??
+            modListFile.mods[enabledPath] ??
+            modListFile.mods[legacyPath];
+
+        const sourcePath = findExistingPath([
+            ...getActiveDllPathCandidates(relativePath),
+            ...getDisabledDllPathCandidates(relativePath),
+        ]);
+        if (!sourcePath) {
+            missingPaths.push(relativePath);
+        } else {
+            addExactZipFile(zip, relativePath, fs.readFileSync(sourcePath));
+        }
+
+        pushInfoFile({
+            path: relativePath,
+            type: 'dll',
+            name: meta?.name,
+            author: meta?.author,
+        });
+        modInfo = {
+            name: meta?.name || path.basename(relativePath, path.extname(relativePath)),
+            author: meta?.author || '',
+            description: meta?.description || '',
+            packageType: 'single',
+            version: meta?.version,
+            files: exportedFiles,
+        };
+    }
+
+    if (missingPaths.length > 0) {
+        throw createExportMissingError(missingPaths);
+    }
+
+    zip.addFile('mod-info.json', Buffer.from(JSON.stringify(modInfo, null, 2)));
+    const finalSavePath = getExportSavePath(savePath);
+    ensureParentDir(finalSavePath);
+    zip.writeZip(finalSavePath);
+    return finalSavePath;
+}
+
 function isGeneratedModInfoCandidate(entryName: string): boolean {
     const base = path.posix.basename(normalizeRelativePath(entryName).toLowerCase());
     return base === 'mod-info.json' || base === 'hexx-mod-info.json';
@@ -1339,6 +1506,22 @@ function packModFromSources(data: {
                 type: 'dll',
                 dependsOn: row?.dependsOn,
             });
+        } else if (source.sourceKind === 'file') {
+            for (const file of source.files) {
+                if (file.type === 'folder' || file.type === 'mod-info') continue;
+                const fileData =
+                    typeof file.contentTextOverride === 'string'
+                        ? Buffer.from(file.contentTextOverride, 'utf-8')
+                        : fs.readFileSync(source.sourcePath);
+                const writtenPath = addUniqueZipFile(zip, file.entryName || path.basename(source.sourcePath), fileData);
+                sourceInfoFiles.push({
+                    path: writtenPath,
+                    name: file.name,
+                    author: file.author || source.author || data.author,
+                    type: file.type,
+                    dependsOn: file.dependsOn,
+                });
+            }
         } else {
             const sourceZip = new AdmZip(source.sourcePath);
             for (const file of source.files) {
@@ -2013,6 +2196,17 @@ function getPackageFeatures(packageId: string): ScriptFeature[] {
         }
     }
     return features;
+}
+
+export function readPackageReadme(packageId: string): string {
+    const modListFile = readModListFile();
+    const pkg = modListFile.packages[packageId];
+    if (!pkg) throw new Error('패키지를 찾을 수 없습니다.');
+    const readme = pkg.files.find((file) => file.type === 'readme');
+    if (!readme) throw new Error('README md 파일이 없습니다.');
+    const fullPath = path.join(PACKAGES_DIR, packageId, readme.path);
+    if (!fs.existsSync(fullPath)) throw new Error(`README md 파일을 찾을 수 없습니다: ${readme.path}`);
+    return fs.readFileSync(fullPath, 'utf-8');
 }
 
 export function applyPackageSettings(packageId: string, changes: ApplyPackageSettingsChanges): PackageSettings {

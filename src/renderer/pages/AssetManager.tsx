@@ -3,13 +3,20 @@ import BackupIcon from '@mui/icons-material/Backup';
 import CheckIcon from '@mui/icons-material/Check';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import FontDownloadIcon from '@mui/icons-material/FontDownload';
+import DeleteIcon from '@mui/icons-material/Delete';
 import RestoreIcon from '@mui/icons-material/Restore';
 import SyncIcon from '@mui/icons-material/Sync';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import DownloadIcon from '@mui/icons-material/Download';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import UpdateIcon from '@mui/icons-material/SystemUpdateAlt';
 import {
+    Alert,
     Box,
     Button,
     Checkbox,
+    Chip,
+    CircularProgress,
     Dialog,
     DialogActions,
     DialogContent,
@@ -34,12 +41,15 @@ import {
     TableHead,
     TableRow,
     Tabs,
+    TextField,
     Tooltip,
     Typography
 } from '@mui/material';
 import { useTextureCatalog } from '../hooks/useTextureCatalog';
+import { useDeveloperShortcut } from '../hooks/useDeveloperShortcut';
 import { useNotification } from '../context/NotificationContext';
 import { getSafeLanguage, t, type LanguageCode } from '../i18n';
+import DeveloperGateDialog from '../components/DeveloperGateDialog';
 
 type BackupStatus = {
     font: BackupStatusItem | string | null;
@@ -59,7 +69,11 @@ type AssetCatalogItem = {
     textureName: string;
     pathId: number;
     category?: string;
+    option1?: string;
+    option1Label?: string;
     option2?: string;
+    displayLabel?: string;
+    preview?: string;
     size?: SizeTuple;
     previewUrl: string;
 };
@@ -78,8 +92,11 @@ type AssetPackTarget = {
     textureName: string;
     pathId: number;
     gender: string;
+    option1?: string;
+    option1Label?: string;
     category: string;
     option2: string;
+    displayLabel?: string;
     png: string;
     preview?: string;
     pngPath: string;
@@ -95,6 +112,12 @@ type AssetPack = {
     packName: string;
     author?: string;
     description?: string;
+    version?: string;
+    source?: {
+        type: 'github';
+        catalogId: string;
+        downloadPath: string;
+    };
     basePath: string;
     targets: AssetPackTarget[];
 };
@@ -102,6 +125,22 @@ type AssetPack = {
 type AssetPackTargetOption = AssetPackTarget & {
     packId: string;
     packName: string;
+};
+
+type CurrentAssetPackEntry = {
+    catalogId: string;
+    category?: string;
+    option1?: string;
+    option2?: string;
+    textureName?: string;
+    pathId?: number;
+    packId: string;
+    packName: string;
+    targetId?: string;
+    targetLabel?: string;
+    previewUrl?: string;
+    pngUrl?: string;
+    appliedAt: string;
 };
 
 type FontTarget = {
@@ -121,6 +160,26 @@ type StoredFont = {
 
 type ChangeMode = 'pack' | 'direct';
 
+type PreviewDialogState = {
+    title: string;
+    imageUrl: string;
+    caption?: string;
+} | null;
+
+type OnlineAssetPackCatalogItem = {
+    id: string;
+    name: string;
+    author?: string;
+    description?: string;
+    version: string;
+    downloadPath: string;
+    thumbnailPath?: string;
+    thumbnailUrl?: string;
+    installed?: boolean;
+    installedVersion?: string;
+    updateAvailable?: boolean;
+};
+
 const CUSTOM_PACK_VALUE = '__custom__';
 const FONT_TARGET_IDS = Array.from({ length: 13 }, (_, index) => 2418 + index);
 
@@ -135,7 +194,11 @@ const FONT_TARGET_DISPLAY_INFO: Record<number, string[]> = {
 
 const genderLabelMap: Record<string, string> = {
     female: '여성',
-    male: '남성'
+    male: '남성',
+    title: '타이틀',
+    main_background: '메인배경',
+    ui_title: '타이틀',
+    ui_main_background: '메인배경'
 };
 
 const categoryLabelMap: Record<string, string> = {
@@ -145,7 +208,9 @@ const categoryLabelMap: Record<string, string> = {
     body: '몸',
     face: '얼굴',
     hair: '헤어',
-    building: '건물'
+    building: '건물',
+    ui: 'UI',
+    UI: 'UI'
 };
 
 const selectSx = {
@@ -225,6 +290,13 @@ const outlinedButtonSx = {
     }
 };
 
+function ignoreBackdropClose(onClose: () => void) {
+    return (_event: unknown, reason?: string) => {
+        if (reason === 'backdropClick') return;
+        onClose();
+    };
+}
+
 function normalizePacks(value: unknown): AssetPack[] {
     if (Array.isArray(value)) return value as AssetPack[];
 
@@ -248,12 +320,22 @@ function toKoreanGender(value: string): string {
     return genderLabelMap[value] || value || '성별 미지정';
 }
 
+function toTargetGroupLabel(value: string, explicitLabel?: string): string {
+    return explicitLabel?.trim() || genderLabelMap[value] || value || '대상 구분 없음';
+}
+
 function toKoreanCategory(value: string): string {
     return categoryLabelMap[value] || value || '종류 미지정';
 }
 
-function formatTargetLabel(target: Pick<AssetPackTarget, 'option2' | 'gender' | 'category'>): string {
-    return [target.option2?.trim(), toKoreanGender(target.gender), toKoreanCategory(target.category)]
+function getTargetOption1(target: Pick<AssetPackTarget, 'gender' | 'option1'>): string {
+    return target.option1 || target.gender || '';
+}
+
+function formatTargetLabel(target: Pick<AssetPackTarget, 'option2' | 'gender' | 'option1' | 'option1Label' | 'category' | 'displayLabel'>): string {
+    if (target.displayLabel?.trim()) return target.displayLabel.trim();
+
+    return [toKoreanCategory(target.category), toTargetGroupLabel(getTargetOption1(target), target.option1Label), target.option2?.trim()]
         .filter(Boolean)
         .join(' ');
 }
@@ -262,21 +344,37 @@ function getCatalogCategory(item: AssetCatalogItem): string {
     return item.category || item.type || '';
 }
 
+function getCatalogOption1(item: AssetCatalogItem): string {
+    return item.option1 || item.gender || '';
+}
+
 function getCatalogOption2(item: AssetCatalogItem): string {
     if (item.option2?.trim()) return item.option2.trim();
 
     const rawLabel = item.label?.trim() || '';
     return rawLabel
-        .replace(toKoreanGender(item.gender), '')
+        .replace(toTargetGroupLabel(getCatalogOption1(item), item.option1Label), '')
         .replace(toKoreanCategory(getCatalogCategory(item)), '')
         .replace(item.textureName, '')
         .replace(/원본/g, '')
         .trim();
 }
 
+function isUiCategory(value: string): boolean {
+    return value.trim().toLowerCase() === 'ui';
+}
+
+function getPatchMetadataLabel(category: string): string {
+    return isUiCategory(category)
+        ? 'UnityPy metadata/ui_textures.tsv'
+        : 'UnityPy metadata/data.tsv';
+}
+
 function formatCatalogItemLabel(item: AssetCatalogItem): string {
+    if (item.displayLabel?.trim()) return item.displayLabel.trim();
+
     const optionLabel = getCatalogOption2(item) || item.textureName || item.label?.trim() || '';
-    return [optionLabel, toKoreanGender(item.gender), toKoreanCategory(getCatalogCategory(item))]
+    return [toKoreanCategory(getCatalogCategory(item)), toTargetGroupLabel(getCatalogOption1(item), item.option1Label), optionLabel]
         .filter(Boolean)
         .join(' ');
 }
@@ -307,8 +405,8 @@ function buildPatchTargetFromPackTarget(target: AssetPackTargetOption) {
         packId: target.packId,
         targetId: target.id,
         category: target.category,
-        option1: target.gender,
-        gender: target.gender,
+        option1: getTargetOption1(target),
+        gender: getTargetOption1(target),
         option2: target.option2,
         textureName: target.textureName,
         pathID: target.pathId,
@@ -322,8 +420,8 @@ function buildPatchTargetFromCatalogItem(item: AssetCatalogItem, pngPath: string
     return {
         catalogId: item.id,
         category: getCatalogCategory(item),
-        option1: item.gender,
-        gender: item.gender,
+        option1: getCatalogOption1(item),
+        gender: getCatalogOption1(item),
         option2: getCatalogOption2(item),
         textureName: item.textureName,
         pathID: item.pathId,
@@ -401,7 +499,7 @@ function formatKb(sizeBytes: number): string {
 
 export default function AssetManager() {
     const { showNotification } = useNotification();
-    const { data: catalog, loading } = useTextureCatalog();
+    const { data: catalog, loading, reload: reloadCatalog } = useTextureCatalog();
 
     const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>('en');
     const [status, setStatus] = useState<BackupStatus>({ font: null, asset: null });
@@ -411,6 +509,11 @@ export default function AssetManager() {
     const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
     const [fontSyncDialogOpen, setFontSyncDialogOpen] = useState(false);
     const [fontApplyDialogOpen, setFontApplyDialogOpen] = useState(false);
+    const [developerGateOpen, setDeveloperGateOpen] = useState(false);
+    const [developerToolsOpen, setDeveloperToolsOpen] = useState(false);
+    const [catalogEditorOpen, setCatalogEditorOpen] = useState(false);
+    const [assetPackDialogOpen, setAssetPackDialogOpen] = useState(false);
+    const [assetPackDistributionOpen, setAssetPackDistributionOpen] = useState(false);
 
     const [activeTab, setActiveTab] = useState(0);
     const [selectedType, setSelectedType] = useState('');
@@ -428,6 +531,8 @@ export default function AssetManager() {
     const [storedFonts, setStoredFonts] = useState<StoredFont[]>([]);
     const [selectedFonts, setSelectedFonts] = useState<Record<number, string>>({});
     const [fontMenu, setFontMenu] = useState<{ mouseX: number; mouseY: number; pathId: number } | null>(null);
+    const [currentAssetPacks, setCurrentAssetPacks] = useState<CurrentAssetPackEntry[]>([]);
+    const [previewDialog, setPreviewDialog] = useState<PreviewDialogState>(null);
 
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
@@ -449,6 +554,11 @@ export default function AssetManager() {
         setStoredFonts(await window.electronAPI.getStoredFonts());
     };
 
+    const loadCurrentAssetPacks = async () => {
+        const result = await window.electronAPI.getCurrentAssetPacks();
+        setCurrentAssetPacks(result.targets || []);
+    };
+
     useEffect(() => {
         window.electronAPI.getSettings().then((settings) => {
             setCurrentLanguage(getSafeLanguage(settings.language));
@@ -457,7 +567,10 @@ export default function AssetManager() {
         loadPacks().catch((err) => showError(err, '어셋팩 목록 로드 실패'));
         loadFontTargets().catch((err) => showError(err, '폰트 목록 로드 실패'));
         loadStoredFonts().catch((err) => showError(err, '저장된 폰트 목록 로드 실패'));
+        loadCurrentAssetPacks().catch((err) => showError(err, '현재 적용 어셋팩 로드 실패'));
     }, []);
+
+    useDeveloperShortcut(() => setDeveloperGateOpen(true));
 
     const types = useMemo(
         () => [...new Set(catalog.map((item: AssetCatalogItem) => getCatalogCategory(item)).filter(Boolean))],
@@ -465,14 +578,14 @@ export default function AssetManager() {
     );
 
     const genders = useMemo(
-        () => [...new Set(catalog.map((item: AssetCatalogItem) => item.gender))],
+        () => [...new Set(catalog.map((item: AssetCatalogItem) => getCatalogOption1(item)).filter(Boolean))],
         [catalog]
     );
 
     const filteredItems = useMemo(
         () => catalog.filter((item: AssetCatalogItem) => (
             (!selectedType || getCatalogCategory(item) === selectedType) &&
-            (!selectedGender || item.gender === selectedGender)
+            (!selectedGender || getCatalogOption1(item) === selectedGender)
         )),
         [catalog, selectedType, selectedGender]
     );
@@ -509,6 +622,21 @@ export default function AssetManager() {
         [allPackTargets, selectedTargetId]
     );
 
+    const currentAssetByCatalogId = useMemo(() => {
+        const map = new Map<string, CurrentAssetPackEntry>();
+        for (const entry of currentAssetPacks) {
+            if (entry.catalogId) map.set(entry.catalogId, entry);
+        }
+        return map;
+    }, [currentAssetPacks]);
+
+    const currentAppliedForSelectedItem = selectedItem ? currentAssetByCatalogId.get(selectedItem.id) : undefined;
+
+    const originalPreviewUrl = currentAppliedForSelectedItem?.previewUrl || currentAppliedForSelectedItem?.pngUrl || selectedItem?.previewUrl || '';
+    const originalPreviewCaption = currentAppliedForSelectedItem
+        ? `현재 적용됨: ${currentAppliedForSelectedItem.packName}${currentAppliedForSelectedItem.targetLabel ? ` · ${currentAppliedForSelectedItem.targetLabel}` : ''}`
+        : selectedItem ? formatCatalogItemLabel(selectedItem) : '';
+
     const packSelectValue = changeMode === 'direct' && replacementPath
         ? CUSTOM_PACK_VALUE
         : selectedPackId || '';
@@ -543,6 +671,32 @@ export default function AssetManager() {
         setError(nextError);
         showNotification(nextError, 'error');
     };
+
+    const saveAppliedPackEntries = async (entries: CurrentAssetPackEntry[]) => {
+        const result = await window.electronAPI.saveCurrentAssetPacks(entries);
+        setCurrentAssetPacks(result.targets || []);
+    };
+
+    const clearAppliedPackEntries = async () => {
+        const result = await window.electronAPI.clearCurrentAssetPacks();
+        setCurrentAssetPacks(result.targets || []);
+    };
+
+    const buildCurrentEntryFromTarget = (target: AssetPackTargetOption): CurrentAssetPackEntry => ({
+        catalogId: target.catalogId,
+        category: target.category,
+        option1: getTargetOption1(target),
+        option2: target.option2,
+        textureName: target.textureName,
+        pathId: target.pathId,
+        packId: target.packId,
+        packName: target.packName,
+        targetId: target.id,
+        targetLabel: formatTargetLabel(target),
+        previewUrl: target.previewUrl || target.pngUrl,
+        pngUrl: target.pngUrl,
+        appliedAt: new Date().toISOString()
+    });
 
     const selectedFontJobCount = useMemo(
         () => Object.values(selectedFonts).filter(Boolean).length,
@@ -591,15 +745,34 @@ export default function AssetManager() {
 
             if (fontChecked) await window.electronAPI.restoreAssetBackup('font');
             if (assetChecked) await window.electronAPI.restoreAssetBackup('asset');
+            if (assetChecked) await clearAppliedPackEntries();
 
             await loadStatus();
             await loadFontTargets();
-            setMessage('백업 파일 복원이 완료되었습니다.');
-            showNotification('백업 파일 복원이 완료되었습니다.', 'success');
+            const restoreMessage = assetChecked
+                ? '백업 파일 복원이 완료되었습니다. 현재 적용 어셋팩 기록도 초기화했습니다.'
+                : '백업 파일 복원이 완료되었습니다.';
+            setMessage(restoreMessage);
+            showNotification(restoreMessage, 'success');
         } catch (err) {
             showError(err, '백업 파일 복원 실패');
         } finally {
             setApplying(false);
+        }
+    };
+
+    const handleClearAppliedPackHistory = async () => {
+        try {
+            resetMessages();
+            if (!window.confirm('현재 적용 어셋팩 기록을 초기화하시겠습니까? 게임 업데이트나 외부 복원으로 원본 상태가 바뀐 경우에만 사용하세요.')) {
+                return;
+            }
+
+            await clearAppliedPackEntries();
+            setMessage('현재 적용 어셋팩 기록을 초기화했습니다.');
+            showNotification('현재 적용 어셋팩 기록을 초기화했습니다.', 'success');
+        } catch (err) {
+            showError(err, '현재 적용 어셋팩 기록 초기화 실패');
         }
     };
 
@@ -623,6 +796,10 @@ export default function AssetManager() {
     };
 
     const handleImportPack = async () => {
+        setAssetPackDialogOpen(true);
+    };
+
+    const handleImportLocalPack = async () => {
         try {
             resetMessages();
             const zipPath = await window.electronAPI.selectAssetPackZip();
@@ -681,7 +858,7 @@ export default function AssetManager() {
         if (matchedCatalog) {
             setSelectedItemId(matchedCatalog.id || '');
             setSelectedType(getCatalogCategory(matchedCatalog) || '');
-            setSelectedGender(matchedCatalog.gender || '');
+            setSelectedGender(getCatalogOption1(matchedCatalog) || '');
         } else {
             setSelectedItemId('');
             showErrorMessage(`카탈로그 항목을 찾지 못했습니다: ${target.catalogId}`);
@@ -721,7 +898,7 @@ export default function AssetManager() {
                 ? buildPatchTargetFromPackTarget(selectedTarget)
                 : buildPatchTargetFromCatalogItem(selectedItem, replacementPath, replacementSize);
 
-            if (!target.option2) {
+            if (!target.option2 && !isUiCategory(target.category || '')) {
                 showErrorMessage('선택한 원본 텍스처에 option2 값이 없습니다. asset_catalog.json 또는 pack.json을 보강해야 합니다.');
                 return;
             }
@@ -734,6 +911,10 @@ export default function AssetManager() {
                 stopOnError: true,
                 targets: [target]
             });
+
+            if (changeMode === 'pack' && selectedTarget) {
+                await saveAppliedPackEntries([buildCurrentEntryFromTarget(selectedTarget)]);
+            }
 
             setMessage('패치가 완료되었습니다.');
             showNotification('패치가 완료되었습니다.', 'success');
@@ -776,8 +957,8 @@ export default function AssetManager() {
                 packName: selectedPack.packName
             }));
 
-            if (targets.some((target) => !target.option2 || !target.category || !target.pngPath)) {
-                showErrorMessage('팩 전체 적용 target 중 option2/category/pngPath가 비어 있는 항목이 있습니다. pack.json을 확인해야 합니다.');
+            if (targets.some((target) => !target.category || !target.pngPath || (!target.option2 && !isUiCategory(target.category || '')))) {
+                showErrorMessage('팩 전체 적용 target 중 category/pngPath 또는 의상 option2가 비어 있는 항목이 있습니다. pack.json을 확인해야 합니다.');
                 return;
             }
 
@@ -789,6 +970,12 @@ export default function AssetManager() {
                 stopOnError: true,
                 targets
             });
+
+            await saveAppliedPackEntries(selectedPack.targets.map((target) => buildCurrentEntryFromTarget({
+                ...target,
+                packId: selectedPack.packId,
+                packName: selectedPack.packName
+            })));
 
             setMessage(`팩 전체 적용이 완료되었습니다. (${targets.length}개)`);
             showNotification(`팩 전체 적용이 완료되었습니다. (${targets.length}개)`, 'success');
@@ -979,12 +1166,15 @@ export default function AssetManager() {
                         <TexturePanel
                             loading={loading}
                             types={types}
-                            genders={genders}
+                            option1Values={genders}
                             filteredItems={filteredItems}
                             selectedType={selectedType}
-                            selectedGender={selectedGender}
+                            selectedOption1={selectedGender}
                             selectedItemId={selectedItemId}
                             selectedItem={selectedItem}
+                            originalPreviewUrl={originalPreviewUrl}
+                            originalPreviewCaption={originalPreviewCaption}
+                            currentAppliedLabel={currentAppliedForSelectedItem ? originalPreviewCaption : ''}
                             packs={packs}
                             selectedPack={selectedPack}
                             selectedPackId={selectedPackId}
@@ -996,11 +1186,12 @@ export default function AssetManager() {
                             packSelectValue={packSelectValue}
                             replacementPath={replacementPath}
                             applying={applying}
+                            currentAppliedCount={currentAssetPacks.length}
                             onTypeChange={(value) => {
                                 setSelectedType(value);
                                 handleSelectItem('');
                             }}
-                            onGenderChange={(value) => {
+                            onOption1Change={(value) => {
                                 setSelectedGender(value);
                                 handleSelectItem('');
                             }}
@@ -1034,6 +1225,8 @@ export default function AssetManager() {
                             onSelectReplacement={handleSelectReplacement}
                             onApplyPatch={handleApplyPatch}
                             onApplyPackAll={handleApplyPackAll}
+                            onClearAppliedPackHistory={handleClearAppliedPackHistory}
+                            onPreviewClick={(title, imageUrl, caption) => setPreviewDialog({ title, imageUrl, caption })}
                         />
                     </Box>
                 )}
@@ -1082,7 +1275,76 @@ export default function AssetManager() {
                 </Paper>
             )}
 
-            <Dialog open={backupDialogOpen} onClose={() => setBackupDialogOpen(false)} slotProps={{ paper: { sx: dialogPaperSx } }}>
+            <DeveloperGateDialog
+                open={developerGateOpen}
+                title="개발자 전용 도구"
+                description="Catalog와 어셋팩 배포 파일을 직접 수정하는 숨김 도구입니다. 대상 정보가 UnityPy metadata와 맞지 않으면 실제 적용이 실패합니다."
+                onClose={() => setDeveloperGateOpen(false)}
+                onUnlocked={() => setDeveloperToolsOpen(true)}
+            />
+
+            <DeveloperToolsDialog
+                open={developerToolsOpen}
+                onClose={() => setDeveloperToolsOpen(false)}
+                onOpenCatalog={() => setCatalogEditorOpen(true)}
+                onOpenAssetPackDistribution={() => setAssetPackDistributionOpen(true)}
+            />
+
+            <CatalogEditorDialog
+                open={catalogEditorOpen}
+                onClose={() => setCatalogEditorOpen(false)}
+                onSaved={async () => {
+                    await reloadCatalog();
+                    setMessage('asset_catalog.json을 저장했습니다.');
+                    showNotification('asset_catalog.json을 저장했습니다.', 'success');
+                }}
+            />
+
+            <AddAssetPackDialog
+                open={assetPackDialogOpen}
+                onClose={() => setAssetPackDialogOpen(false)}
+                onImportLocal={handleImportLocalPack}
+                onImported={(nextPacks, packName) => {
+                    setPacks(normalizePacks(nextPacks));
+                    setChangeMode('pack');
+                    setSelectedPackId('');
+                    setSelectedTargetId('');
+                    setReplacementPath('');
+                    setReplacementUrl('');
+                    setMessage(`어셋팩을 등록했습니다: ${packName}`);
+                    showNotification(`어셋팩을 등록했습니다: ${packName}`, 'success');
+                }}
+            />
+
+            <AssetPackDistributionDialog
+                open={assetPackDistributionOpen}
+                onClose={() => setAssetPackDistributionOpen(false)}
+                onCreated={(result) => {
+                    setMessage(`어셋팩 배포 파일을 생성했습니다: ${result.item.name}`);
+                    showNotification(`어셋팩 배포 파일을 생성했습니다: ${result.item.name}`, 'success');
+                    window.electronAPI.importAssetPack(result.zipPath)
+                        .then((nextPacks) => {
+                            const normalized = normalizePacks(nextPacks);
+                            setPacks(normalized);
+                            const createdPack = normalized.find((pack) => pack.packId === result.item.id);
+                            if (createdPack) {
+                                setChangeMode('pack');
+                                setSelectedPackId(createdPack.packId);
+                                setSelectedTargetId('');
+                                setReplacementPath('');
+                                setReplacementUrl('');
+                            }
+                        })
+                        .catch((err) => showError(err, '생성한 어셋팩 로컬 등록 실패'));
+                }}
+            />
+
+            <ImagePreviewDialog
+                preview={previewDialog}
+                onClose={() => setPreviewDialog(null)}
+            />
+
+            <Dialog open={backupDialogOpen} onClose={ignoreBackdropClose(() => setBackupDialogOpen(false))} slotProps={{ paper: { sx: dialogPaperSx } }}>
                 <DialogTitle sx={dialogTitleSx}>백업 확인</DialogTitle>
                 <DialogContent sx={dialogContentSx}>
                     <Typography sx={{ color: 'var(--text-color)' }}>
@@ -1102,7 +1364,7 @@ export default function AssetManager() {
                 </DialogActions>
             </Dialog>
 
-            <Dialog open={restoreDialogOpen} onClose={() => setRestoreDialogOpen(false)} slotProps={{ paper: { sx: dialogPaperSx } }}>
+            <Dialog open={restoreDialogOpen} onClose={ignoreBackdropClose(() => setRestoreDialogOpen(false))} slotProps={{ paper: { sx: dialogPaperSx } }}>
                 <DialogTitle sx={dialogTitleSx}>복원 확인</DialogTitle>
                 <DialogContent sx={dialogContentSx}>
                     <Typography sx={{ color: 'var(--text-color)' }}>
@@ -1120,7 +1382,7 @@ export default function AssetManager() {
                 </DialogActions>
             </Dialog>
 
-            <Dialog open={fontSyncDialogOpen} onClose={() => setFontSyncDialogOpen(false)} slotProps={{ paper: { sx: dialogPaperSx } }}>
+            <Dialog open={fontSyncDialogOpen} onClose={ignoreBackdropClose(() => setFontSyncDialogOpen(false))} slotProps={{ paper: { sx: dialogPaperSx } }}>
                 <DialogTitle sx={dialogTitleSx}>폰트 리스트 동기화</DialogTitle>
                 <DialogContent sx={dialogContentSx}>
                     <Typography sx={{ color: 'var(--text-color)' }}>
@@ -1135,7 +1397,7 @@ export default function AssetManager() {
                 </DialogActions>
             </Dialog>
 
-            <Dialog open={fontApplyDialogOpen} onClose={() => setFontApplyDialogOpen(false)} slotProps={{ paper: { sx: dialogPaperSx } }}>
+            <Dialog open={fontApplyDialogOpen} onClose={ignoreBackdropClose(() => setFontApplyDialogOpen(false))} slotProps={{ paper: { sx: dialogPaperSx } }}>
                 <DialogTitle sx={dialogTitleSx}>선택 폰트 적용 확인</DialogTitle>
                 <DialogContent sx={dialogContentSx}>
                     <Typography sx={{ color: 'var(--text-color)' }}>
@@ -1156,12 +1418,15 @@ export default function AssetManager() {
 function TexturePanel({
     loading,
     types,
-    genders,
+    option1Values,
     filteredItems,
     selectedType,
-    selectedGender,
+    selectedOption1,
     selectedItemId,
     selectedItem,
+    originalPreviewUrl,
+    originalPreviewCaption,
+    currentAppliedLabel,
     packs,
     selectedPack,
     selectedPackId,
@@ -1173,8 +1438,9 @@ function TexturePanel({
     packSelectValue,
     replacementPath,
     applying,
+    currentAppliedCount,
     onTypeChange,
-    onGenderChange,
+    onOption1Change,
     onItemChange,
     onModeChange,
     onPackChange,
@@ -1182,16 +1448,21 @@ function TexturePanel({
     onImportPack,
     onSelectReplacement,
     onApplyPatch,
-    onApplyPackAll
+    onApplyPackAll,
+    onClearAppliedPackHistory,
+    onPreviewClick
 }: {
     loading: boolean;
     types: string[];
-    genders: string[];
+    option1Values: string[];
     filteredItems: AssetCatalogItem[];
     selectedType: string;
-    selectedGender: string;
+    selectedOption1: string;
     selectedItemId: string;
     selectedItem?: AssetCatalogItem;
+    originalPreviewUrl: string;
+    originalPreviewCaption: string;
+    currentAppliedLabel: string;
     packs: AssetPack[];
     selectedPack?: AssetPack;
     selectedPackId: string;
@@ -1203,8 +1474,9 @@ function TexturePanel({
     packSelectValue: string;
     replacementPath: string;
     applying: boolean;
+    currentAppliedCount: number;
     onTypeChange: (value: string) => void;
-    onGenderChange: (value: string) => void;
+    onOption1Change: (value: string) => void;
     onItemChange: (value: string) => void;
     onModeChange: (value: ChangeMode) => void;
     onPackChange: (value: string) => void;
@@ -1213,6 +1485,8 @@ function TexturePanel({
     onSelectReplacement: () => void;
     onApplyPatch: () => void;
     onApplyPackAll: () => void;
+    onClearAppliedPackHistory: () => void;
+    onPreviewClick: (title: string, imageUrl: string, caption?: string) => void;
 }) {
     return (
         <>
@@ -1229,11 +1503,11 @@ function TexturePanel({
                         </Select>
                     </FormControl>
                     <FormControl size="small" sx={{ minWidth: 180 }}>
-                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>성별</InputLabel>
-                        <Select value={selectedGender} label="성별" onChange={(e) => onGenderChange(String(e.target.value || ''))} sx={selectSx}>
+                        <InputLabel sx={{ color: 'var(--text-color-light)' }}>대상 구분</InputLabel>
+                        <Select value={selectedOption1} label="대상 구분" onChange={(e) => onOption1Change(String(e.target.value || ''))} sx={selectSx}>
                             <MenuItem value="">전체</MenuItem>
-                            {genders.map((itemGender) => (
-                                <MenuItem key={itemGender} value={itemGender}>{toKoreanGender(itemGender)}</MenuItem>
+                            {option1Values.map((itemOption1) => (
+                                <MenuItem key={itemOption1} value={itemOption1}>{toTargetGroupLabel(itemOption1)}</MenuItem>
                             ))}
                         </Select>
                     </FormControl>
@@ -1248,6 +1522,11 @@ function TexturePanel({
                     </FormControl>
                 </Stack>
                 {loading && <Typography sx={{ mt: 2, color: 'var(--text-color-light)' }}>카탈로그를 불러오는 중입니다.</Typography>}
+                {currentAppliedLabel && (
+                    <Alert severity="success" sx={{ mt: 2 }}>
+                        {currentAppliedLabel}
+                    </Alert>
+                )}
             </Paper>
 
             <Paper sx={innerPaperSx}>
@@ -1283,6 +1562,15 @@ function TexturePanel({
                     </FormControl>
                     <Button variant="contained" startIcon={<UploadFileIcon />} onClick={onImportPack} sx={containedButtonSx}>어셋팩 추가</Button>
                     <Button variant="contained" startIcon={<FileDownloadIcon />} onClick={onSelectReplacement} sx={containedButtonSx}>변경 이미지 직접 선택</Button>
+                    <Button
+                        variant="outlined"
+                        startIcon={<RestoreIcon />}
+                        onClick={onClearAppliedPackHistory}
+                        disabled={currentAppliedCount === 0 || applying}
+                        sx={outlinedButtonSx}
+                    >
+                        적용 기록 초기화
+                    </Button>
                 </Stack>
                 {selectedPack && changeMode === 'pack' && (
                     <Typography sx={{ mt: 2, color: 'var(--text-color-light)' }}>
@@ -1297,15 +1585,17 @@ function TexturePanel({
                 <Stack direction="row" spacing={3} sx={{ mt: 2, flexWrap: 'wrap', rowGap: 3 }}>
                     <PreviewCard
                         title="원본 미리보기"
-                        imageUrl={selectedItem?.previewUrl || ''}
+                        imageUrl={originalPreviewUrl}
                         emptyText="원본 텍스처를 선택하세요."
-                        caption={selectedItem ? formatCatalogItemLabel(selectedItem) : ''}
+                        caption={originalPreviewCaption}
+                        onClick={(imageUrl) => onPreviewClick('원본 미리보기', imageUrl, originalPreviewCaption)}
                     />
                     <PreviewCard
                         title="변경 미리보기"
                         imageUrl={replacementUrl}
                         emptyText="어셋팩 대상 또는 직접 이미지를 선택하세요."
                         caption={replacementCaption}
+                        onClick={(imageUrl) => onPreviewClick('변경 미리보기', imageUrl, replacementCaption)}
                     />
                 </Stack>
             </Paper>
@@ -1324,6 +1614,855 @@ function TexturePanel({
         </>
     );
 }
+
+function ImagePreviewDialog({
+    preview,
+    onClose
+}: {
+    preview: PreviewDialogState;
+    onClose: () => void;
+}) {
+    return (
+        <Dialog open={Boolean(preview)} onClose={ignoreBackdropClose(onClose)} maxWidth="lg" fullWidth slotProps={{ paper: { sx: dialogPaperSx } }}>
+            <DialogTitle sx={dialogTitleSx}>{preview?.title || '미리보기'}</DialogTitle>
+            <DialogContent sx={dialogContentSx}>
+                {preview?.imageUrl && (
+                    <Box
+                        component="img"
+                        src={preview.imageUrl}
+                        sx={{
+                            display: 'block',
+                            width: '100%',
+                            maxHeight: '72vh',
+                            objectFit: 'contain',
+                            background: 'var(--bg-color)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 1
+                        }}
+                    />
+                )}
+                {preview?.caption && (
+                    <Typography sx={{ mt: 1, color: 'var(--text-color-light)', wordBreak: 'break-all' }}>
+                        {preview.caption}
+                    </Typography>
+                )}
+            </DialogContent>
+            <DialogActions sx={dialogActionsSx}>
+                <Button onClick={onClose} sx={outlinedButtonSx}>닫기</Button>
+            </DialogActions>
+        </Dialog>
+    );
+}
+
+function DeveloperToolsDialog({
+    open,
+    onClose,
+    onOpenCatalog,
+    onOpenAssetPackDistribution
+}: {
+    open: boolean;
+    onClose: () => void;
+    onOpenCatalog: () => void;
+    onOpenAssetPackDistribution: () => void;
+}) {
+    return (
+        <Dialog open={open} onClose={ignoreBackdropClose(onClose)} maxWidth="sm" fullWidth slotProps={{ paper: { sx: dialogPaperSx } }}>
+            <DialogTitle sx={dialogTitleSx}>개발자 전용 도구</DialogTitle>
+            <DialogContent sx={dialogContentSx}>
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                    이 창은 배포 catalog와 로컬 설정 파일을 직접 수정합니다. 변경 후 커밋 전에 생성된 파일 경로와 JSON 내용을 확인하세요.
+                </Alert>
+                <Stack spacing={1.5}>
+                    <Paper sx={{ p: 1.5, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
+                        <Typography sx={{ color: 'var(--text-color)', fontWeight: 800 }}>Catalog Editor</Typography>
+                        <Typography sx={{ color: 'var(--text-color-light)', fontSize: 13, mt: 0.5 }}>
+                            config/asset_catalog.json의 원본 대상 정보를 수정합니다.
+                        </Typography>
+                        <Button variant="outlined" onClick={onOpenCatalog} sx={{ ...outlinedButtonSx, mt: 1 }}>
+                            열기
+                        </Button>
+                    </Paper>
+                    <Paper sx={{ p: 1.5, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
+                        <Typography sx={{ color: 'var(--text-color)', fontWeight: 800 }}>어셋팩 배포</Typography>
+                        <Typography sx={{ color: 'var(--text-color-light)', fontSize: 13, mt: 0.5 }}>
+                            asset-packs/index.json과 packages, thumbnails 폴더를 생성하거나 갱신합니다.
+                        </Typography>
+                        <Button variant="outlined" onClick={onOpenAssetPackDistribution} sx={{ ...outlinedButtonSx, mt: 1 }}>
+                            열기
+                        </Button>
+                    </Paper>
+                </Stack>
+            </DialogContent>
+            <DialogActions sx={dialogActionsSx}>
+                <Button onClick={onClose} sx={outlinedButtonSx}>닫기</Button>
+            </DialogActions>
+        </Dialog>
+    );
+}
+
+function AddAssetPackDialog({
+    open,
+    onClose,
+    onImportLocal,
+    onImported
+}: {
+    open: boolean;
+    onClose: () => void;
+    onImportLocal: () => Promise<void>;
+    onImported: (packs: AssetPack[], packName: string) => void;
+}) {
+    const [activeTab, setActiveTab] = useState<'online' | 'local'>('online');
+    const [onlinePacks, setOnlinePacks] = useState<OnlineAssetPackCatalogItem[]>([]);
+    const [onlineLoading, setOnlineLoading] = useState(false);
+    const [onlineLoaded, setOnlineLoaded] = useState(false);
+    const [onlineWorkingId, setOnlineWorkingId] = useState<string | null>(null);
+    const [error, setError] = useState('');
+
+    const loadOnlinePacks = async () => {
+        setOnlineLoading(true);
+        setError('');
+        try {
+            setOnlinePacks(await window.electronAPI.getOnlineAssetPackCatalog());
+        } catch (err) {
+            setOnlinePacks([]);
+            setError(err instanceof Error ? err.message : '온라인 어셋팩 목록을 불러오지 못했습니다.');
+        } finally {
+            setOnlineLoaded(true);
+            setOnlineLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (open && activeTab === 'online' && !onlineLoaded && !onlineLoading) {
+            void loadOnlinePacks();
+        }
+    }, [open, activeTab, onlineLoaded, onlineLoading]);
+
+    const handleOnlineAction = async (item: OnlineAssetPackCatalogItem) => {
+        setOnlineWorkingId(item.id);
+        setError('');
+        try {
+            const result = item.installed && item.updateAvailable
+                ? await window.electronAPI.updateOnlineAssetPack(item)
+                : await window.electronAPI.downloadOnlineAssetPack(item);
+            onImported(normalizePacks(result), item.name);
+            setOnlinePacks(await window.electronAPI.getOnlineAssetPackCatalog());
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '온라인 어셋팩 처리 실패');
+        } finally {
+            setOnlineWorkingId(null);
+        }
+    };
+
+    const handleLocalImport = async () => {
+        await onImportLocal();
+        onClose();
+    };
+
+    return (
+        <Dialog open={open} onClose={ignoreBackdropClose(onClose)} maxWidth="md" fullWidth slotProps={{ paper: { sx: dialogPaperSx } }}>
+            <DialogTitle sx={dialogTitleSx}>어셋팩 추가</DialogTitle>
+            <Tabs
+                value={activeTab}
+                onChange={(_event, value) => setActiveTab(value)}
+                sx={{
+                    borderBottom: '1px solid var(--border-color)',
+                    '& .MuiTab-root': { color: 'var(--text-color-light)' },
+                    '& .Mui-selected': { color: 'var(--primary-color)' },
+                    '& .MuiTabs-indicator': { backgroundColor: 'var(--primary-color)' }
+                }}
+            >
+                <Tab value="online" label="온라인" />
+                <Tab value="local" label="로컬" />
+            </Tabs>
+            <DialogContent sx={dialogContentSx}>
+                {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+                {activeTab === 'online' ? (
+                    <Stack spacing={2}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, alignItems: 'center' }}>
+                            <Typography sx={{ color: 'var(--text-color-light)', fontSize: 13 }}>
+                                GitHub catalog에서 등록된 어셋팩을 설치하거나 업데이트합니다.
+                            </Typography>
+                            <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={onlineLoading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                                onClick={loadOnlinePacks}
+                                disabled={onlineLoading}
+                                sx={outlinedButtonSx}
+                            >
+                                새로고침
+                            </Button>
+                        </Box>
+                        <Stack spacing={1}>
+                            {onlinePacks.map((item) => {
+                                const working = onlineWorkingId === item.id;
+                                const actionLabel = item.installed
+                                    ? item.updateAvailable
+                                        ? '업데이트'
+                                        : '설치됨'
+                                    : '다운로드';
+                                return (
+                                    <Paper
+                                        key={item.id}
+                                        sx={{ p: 1.25, background: 'var(--input-bg-color)', border: '1px solid var(--border-color)' }}
+                                    >
+                                        <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center' }}>
+                                            <Box
+                                                sx={{
+                                                    width: 96,
+                                                    height: 64,
+                                                    border: '1px solid var(--border-color)',
+                                                    background: 'var(--sidebar-bg-color)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    flexShrink: 0
+                                                }}
+                                            >
+                                                {item.thumbnailUrl ? (
+                                                    <Box component="img" src={item.thumbnailUrl} sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                                                ) : (
+                                                    <Typography sx={{ color: 'var(--text-color-light)', fontSize: 11 }}>No image</Typography>
+                                                )}
+                                            </Box>
+                                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                                                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                                                    <Typography sx={{ color: 'var(--text-color)', fontWeight: 800 }}>{item.name}</Typography>
+                                                    <Chip label={`v${item.version}`} size="small" sx={{ height: 20, fontSize: 11 }} />
+                                                    {item.installed && (
+                                                        <Chip
+                                                            label={item.updateAvailable ? `업데이트 가능: ${item.installedVersion}` : '설치됨'}
+                                                            size="small"
+                                                            sx={{
+                                                                height: 20,
+                                                                fontSize: 11,
+                                                                background: item.updateAvailable ? 'var(--warn-color, #e6a817)' : 'var(--primary-color)',
+                                                                color: '#fff'
+                                                            }}
+                                                        />
+                                                    )}
+                                                </Stack>
+                                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12, mt: 0.25 }}>
+                                                    {item.author || '-'}
+                                                </Typography>
+                                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12, mt: 0.75 }}>
+                                                    {item.description || '설명 없음'}
+                                                </Typography>
+                                            </Box>
+                                            <Button
+                                                size="small"
+                                                variant={item.updateAvailable || !item.installed ? 'contained' : 'outlined'}
+                                                startIcon={working ? <CircularProgress size={14} /> : item.updateAvailable ? <UpdateIcon /> : <DownloadIcon />}
+                                                disabled={working || (item.installed && !item.updateAvailable)}
+                                                onClick={() => handleOnlineAction(item)}
+                                                sx={item.updateAvailable || !item.installed ? containedButtonSx : outlinedButtonSx}
+                                            >
+                                                {actionLabel}
+                                            </Button>
+                                        </Stack>
+                                    </Paper>
+                                );
+                            })}
+                            {!onlineLoading && onlinePacks.length === 0 && (
+                                <Typography sx={{ color: 'var(--text-color-light)', textAlign: 'center', py: 3 }}>
+                                    {error ? '온라인 어셋팩 목록을 표시할 수 없습니다.' : '표시할 온라인 어셋팩이 없습니다.'}
+                                </Typography>
+                            )}
+                            {onlineLoading && (
+                                <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+                                    <CircularProgress size={24} />
+                                </Box>
+                            )}
+                        </Stack>
+                    </Stack>
+                ) : (
+                    <Stack spacing={2}>
+                        <Typography sx={{ color: 'var(--text-color-light)', fontSize: 13 }}>
+                            로컬 Asset Pack ZIP을 선택해 storage/asset_packs에 등록합니다.
+                        </Typography>
+                        <Button variant="contained" startIcon={<UploadFileIcon />} onClick={handleLocalImport} sx={containedButtonSx}>
+                            로컬 ZIP 선택
+                        </Button>
+                    </Stack>
+                )}
+            </DialogContent>
+            <DialogActions sx={dialogActionsSx}>
+                <Button onClick={onClose} sx={outlinedButtonSx}>닫기</Button>
+            </DialogActions>
+        </Dialog>
+    );
+}
+
+function AssetPackDistributionDialog({
+    open,
+    onClose,
+    onCreated
+}: {
+    open: boolean;
+    onClose: () => void;
+    onCreated: (result: { item: OnlineAssetPackCatalogItem; indexPath: string; zipPath: string; thumbnailPath?: string }) => void;
+}) {
+    type DistributionTargetRow = {
+        rowId: string;
+        pngPath: string;
+        pngUrl: string;
+        fileName: string;
+        size?: SizeTuple;
+        catalogId: string;
+        displayLabel: string;
+        category: string;
+        option1: string;
+        option1Label: string;
+        option2: string;
+        textureName: string;
+        pathId: string;
+    };
+
+    const [id, setId] = useState('');
+    const [name, setName] = useState('');
+    const [author, setAuthor] = useState('HexX');
+    const [description, setDescription] = useState('');
+    const [version, setVersion] = useState('1.0.0');
+    const [zipPath, setZipPath] = useState('');
+    const [thumbnailPath, setThumbnailPath] = useState('');
+    const [catalogItems, setCatalogItems] = useState<AssetCatalogItem[]>([]);
+    const [targetRows, setTargetRows] = useState<DistributionTargetRow[]>([]);
+    const [resultText, setResultText] = useState('');
+    const [error, setError] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!open) return;
+
+        window.electronAPI.getAssetCatalog()
+            .then((result) => setCatalogItems((result.items || []) as AssetCatalogItem[]))
+            .catch(() => setCatalogItems([]));
+    }, [open]);
+
+    const updateTargetRow = (rowId: string, patch: Partial<DistributionTargetRow>) => {
+        setTargetRows((prev) => prev.map((row) => (row.rowId === rowId ? { ...row, ...patch } : row)));
+    };
+
+    const applyCatalogToRow = (rowId: string, catalogId: string) => {
+        const item = catalogItems.find((candidate) => candidate.id === catalogId);
+        if (!item) {
+            updateTargetRow(rowId, { catalogId });
+            return;
+        }
+
+        updateTargetRow(rowId, {
+            catalogId,
+            displayLabel: item.displayLabel || formatCatalogItemLabel(item),
+            category: getCatalogCategory(item),
+            option1: getCatalogOption1(item),
+            option1Label: item.option1Label || toTargetGroupLabel(getCatalogOption1(item)),
+            option2: getCatalogOption2(item),
+            textureName: item.textureName || '',
+            pathId: String(item.pathId || '')
+        });
+    };
+
+    const handleSelectPngs = async () => {
+        const selected = (await window.electronAPI.selectAssetPackPngs()) as Array<{
+            path: string;
+            name: string;
+            url: string;
+            size?: SizeTuple;
+        }>;
+        if (!selected.length) return;
+
+        setZipPath('');
+        setTargetRows((prev) => [
+            ...prev,
+            ...selected.map((file, index) => ({
+                rowId: `${Date.now()}_${index}_${file.name}`,
+                pngPath: file.path,
+                pngUrl: file.url,
+                fileName: file.name,
+                size: file.size,
+                catalogId: '',
+                displayLabel: '',
+                category: 'UI',
+                option1: '',
+                option1Label: '',
+                option2: '',
+                textureName: '',
+                pathId: ''
+            }))
+        ]);
+
+        if (!id && selected[0]) {
+            const baseName = selected[0].name.replace(/\.png$/i, '');
+            setId(baseName);
+            setName((prev) => prev || baseName);
+        }
+    };
+
+    const handleSelectZip = async () => {
+        const selected = await window.electronAPI.selectAssetPackZip();
+        if (!selected) return;
+        setZipPath(selected);
+        setTargetRows([]);
+        if (!id) {
+            const fileName = getFileName(selected).replace(/\.zip$/i, '');
+            setId(fileName);
+            setName((prev) => prev || fileName);
+        }
+    };
+
+    const handleSelectThumbnail = async () => {
+        const selected = await window.electronAPI.selectAssetPackThumbnail();
+        if (!selected) return;
+        setThumbnailPath(selected);
+    };
+
+    const handleCreate = async () => {
+        setSaving(true);
+        setError('');
+        setResultText('');
+        try {
+            const invalidRow = targetRows.find((row) => (
+                !row.catalogId ||
+                !row.category ||
+                !row.option1 ||
+                !row.textureName ||
+                !row.pathId ||
+                (!row.option2 && !isUiCategory(row.category))
+            ));
+            if (invalidRow) {
+                throw new Error(`${invalidRow.fileName}: 적용대상 정보를 모두 입력하세요. UI가 아닌 target은 option2도 필요합니다.`);
+            }
+
+            const result = await window.electronAPI.createAssetPackDistribution({
+                id,
+                name,
+                author,
+                description,
+                version,
+                zipPath: zipPath || undefined,
+                thumbnailPath,
+                gameIds: ['long-yin-li-zhi-zhuan'],
+                targets: targetRows.map((row) => ({
+                    catalogId: row.catalogId,
+                    category: row.category,
+                    option1: row.option1,
+                    gender: row.option1,
+                    option1Label: row.option1Label,
+                    option2: row.option2,
+                    displayLabel: row.displayLabel,
+                    textureName: row.textureName,
+                    pathId: Number(row.pathId),
+                    size: row.size,
+                    pngPath: row.pngPath,
+                    previewPath: row.pngPath
+                }))
+            });
+            setResultText([
+                `index: ${result.indexPath}`,
+                `zip: ${result.zipPath}`,
+                result.thumbnailPath ? `thumbnail: ${result.thumbnailPath}` : ''
+            ].filter(Boolean).join('\n'));
+            onCreated(result);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '어셋팩 배포 파일 생성 실패');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <Dialog open={open} onClose={ignoreBackdropClose(onClose)} maxWidth="md" fullWidth slotProps={{ paper: { sx: dialogPaperSx } }}>
+            <DialogTitle sx={dialogTitleSx}>어셋팩 배포용 파일 생성</DialogTitle>
+            <DialogContent sx={dialogContentSx}>
+                <Typography sx={{ color: 'var(--text-color-light)', mb: 2, fontSize: 13 }}>
+                    PNG를 여러 개 추가한 뒤 각 PNG마다 적용대상을 지정하면 pack.json과 배포 ZIP이 함께 생성됩니다. thumbnail PNG는 최대 420x280으로 축소됩니다.
+                </Typography>
+                {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+                <Stack spacing={1.5}>
+                    <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
+                        <TextField size="small" label="id" value={id} onChange={(e) => setId(e.target.value)} sx={editorFieldSx(180)} />
+                        <TextField size="small" label="제목" value={name} onChange={(e) => setName(e.target.value)} sx={editorFieldSx(220)} />
+                        <TextField size="small" label="version" value={version} onChange={(e) => setVersion(e.target.value)} sx={editorFieldSx(120)} />
+                        <TextField size="small" label="제작자" value={author} onChange={(e) => setAuthor(e.target.value)} sx={editorFieldSx(160)} />
+                    </Stack>
+                    <TextField
+                        size="small"
+                        label="설명"
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        multiline
+                        minRows={3}
+                        sx={{ ...editorFieldSx(1), width: '100%' }}
+                    />
+                    <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
+                        <Button variant="contained" startIcon={<UploadFileIcon />} onClick={handleSelectPngs} sx={containedButtonSx}>
+                            PNG 추가
+                        </Button>
+                        <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={handleSelectZip} sx={outlinedButtonSx}>
+                            완성 ZIP 선택
+                        </Button>
+                        <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12, wordBreak: 'break-all' }}>
+                            {targetRows.length ? `PNG ${targetRows.length}개` : zipPath || '선택된 파일 없음'}
+                        </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
+                        <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={handleSelectThumbnail} sx={outlinedButtonSx}>
+                            미리보기 PNG 선택
+                        </Button>
+                        <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12, wordBreak: 'break-all' }}>
+                            {thumbnailPath || '선택된 PNG 없음'}
+                        </Typography>
+                    </Stack>
+                    {targetRows.length > 0 && (
+                        <Stack spacing={1.25}>
+                            {targetRows.map((row, index) => (
+                                <Paper key={row.rowId} sx={{ p: 1.5, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
+                                    <Stack direction="row" spacing={1.25} sx={{ alignItems: 'flex-start' }}>
+                                        <Box
+                                            component="img"
+                                            src={row.pngUrl}
+                                            sx={{
+                                                width: 104,
+                                                height: 72,
+                                                objectFit: 'contain',
+                                                border: '1px solid var(--border-color)',
+                                                background: 'var(--sidebar-bg-color)',
+                                                flexShrink: 0
+                                            }}
+                                        />
+                                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
+                                                <Typography sx={{ color: 'var(--text-color)', fontWeight: 800 }}>
+                                                    {index + 1}. {row.fileName}
+                                                </Typography>
+                                                {row.size && (
+                                                    <Chip label={`${row.size[0]}x${row.size[1]}`} size="small" sx={{ height: 20, fontSize: 11 }} />
+                                                )}
+                                                <Button
+                                                    size="small"
+                                                    variant="outlined"
+                                                    onClick={() => setTargetRows((prev) => prev.filter((target) => target.rowId !== row.rowId))}
+                                                    sx={outlinedButtonSx}
+                                                >
+                                                    제거
+                                                </Button>
+                                            </Stack>
+                                            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
+                                                <FormControl size="small" sx={{ minWidth: 240 }}>
+                                                    <InputLabel sx={{ color: 'var(--text-color-light)' }}>적용대상</InputLabel>
+                                                    <Select
+                                                        value={row.catalogId}
+                                                        label="적용대상"
+                                                        onChange={(event) => applyCatalogToRow(row.rowId, String(event.target.value || ''))}
+                                                        sx={selectSx}
+                                                    >
+                                                        <MenuItem value="">선택 안함</MenuItem>
+                                                        {catalogItems.map((item) => (
+                                                            <MenuItem key={item.id} value={item.id}>{formatCatalogItemLabel(item)}</MenuItem>
+                                                        ))}
+                                                    </Select>
+                                                </FormControl>
+                                                <TextField size="small" label="드롭다운 표시명" value={row.displayLabel} onChange={(e) => updateTargetRow(row.rowId, { displayLabel: e.target.value })} sx={editorFieldSx(180)} />
+                                                <TextField size="small" label="종류" value={row.category} onChange={(e) => updateTargetRow(row.rowId, { category: e.target.value })} sx={editorFieldSx(90)} />
+                                                <TextField size="small" label="대상 구분" value={row.option1} onChange={(e) => updateTargetRow(row.rowId, { option1: e.target.value })} sx={editorFieldSx(110)} />
+                                                <TextField size="small" label="대상 라벨" value={row.option1Label} onChange={(e) => updateTargetRow(row.rowId, { option1Label: e.target.value })} sx={editorFieldSx(110)} />
+                                                <TextField size="small" label="option2" value={row.option2} onChange={(e) => updateTargetRow(row.rowId, { option2: e.target.value })} sx={editorFieldSx(120)} />
+                                                <TextField size="small" label="textureName" value={row.textureName} onChange={(e) => updateTargetRow(row.rowId, { textureName: e.target.value })} sx={editorFieldSx(150)} />
+                                                <TextField size="small" label="pathId" value={row.pathId} onChange={(e) => updateTargetRow(row.rowId, { pathId: e.target.value })} sx={editorFieldSx(90)} />
+                                            </Stack>
+                                        </Box>
+                                    </Stack>
+                                </Paper>
+                            ))}
+                        </Stack>
+                    )}
+                    {resultText && (
+                        <Alert severity="success">
+                            <Typography component="pre" sx={{ m: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>
+                                {resultText}
+                            </Typography>
+                        </Alert>
+                    )}
+                </Stack>
+            </DialogContent>
+            <DialogActions sx={dialogActionsSx}>
+                <Button onClick={onClose} sx={outlinedButtonSx}>닫기</Button>
+                <Button variant="contained" onClick={handleCreate} disabled={saving} sx={containedButtonSx}>
+                    생성
+                </Button>
+            </DialogActions>
+        </Dialog>
+    );
+}
+
+type CatalogEditorRow = Omit<AssetCatalogItem, 'pathId' | 'size'> & {
+    rowId: string;
+    pathId: string;
+    sizeText: string;
+};
+
+function toCatalogEditorRow(item: AssetCatalogItem): CatalogEditorRow {
+    return {
+        ...item,
+        rowId: item.id || `row_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        option1: getCatalogOption1(item),
+        option1Label: item.option1Label || toTargetGroupLabel(getCatalogOption1(item)),
+        displayLabel: item.displayLabel || formatCatalogItemLabel(item),
+        pathId: String(item.pathId || ''),
+        sizeText: item.size ? `${item.size[0]},${item.size[1]}` : ''
+    };
+}
+
+function toCatalogItem(row: CatalogEditorRow): AssetCatalogItem {
+    const sizeParts = row.sizeText.split(',').map((value) => Number(value.trim()));
+    const option1 = row.option1?.trim() || row.gender?.trim() || '';
+
+    return {
+        id: row.id.trim(),
+        gender: option1,
+        type: row.category?.trim() || row.type?.trim() || '',
+        label: row.label?.trim() || row.displayLabel?.trim() || row.id.trim(),
+        textureName: row.textureName.trim(),
+        pathId: Number(row.pathId),
+        category: row.category?.trim() || row.type?.trim() || '',
+        option1,
+        option1Label: row.option1Label?.trim() || option1,
+        option2: row.option2?.trim() || '',
+        displayLabel: row.displayLabel?.trim() || row.label?.trim() || '',
+        preview: row.preview?.trim() || '',
+        size: [sizeParts[0], sizeParts[1]],
+        previewUrl: row.previewUrl || ''
+    };
+}
+
+function createCatalogEditorRow(): CatalogEditorRow {
+    return {
+        rowId: `row_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        id: '',
+        gender: '',
+        type: 'UI',
+        label: '',
+        textureName: '',
+        pathId: '',
+        category: 'UI',
+        option1: '',
+        option1Label: '',
+        option2: '',
+        displayLabel: '',
+        preview: '',
+        previewUrl: '',
+        sizeText: ''
+    };
+}
+
+function validateEditorRows(rows: CatalogEditorRow[]): string {
+    const seen = new Set<string>();
+
+    for (const [index, row] of rows.entries()) {
+        const prefix = `${index + 1}번째 항목`;
+        const required = [
+            ['id', row.id],
+            ['category', row.category],
+            ['option1', row.option1],
+            ['textureName', row.textureName],
+            ['pathId', row.pathId],
+            ['size', row.sizeText]
+        ];
+
+        if (!isUiCategory(row.category || '')) {
+            required.push(['option2', row.option2]);
+        }
+
+        for (const [name, value] of required) {
+            if (!String(value || '').trim()) return `${prefix}: ${name} 값이 없습니다.`;
+        }
+
+        if (seen.has(row.id.trim())) return `${prefix}: id가 중복되었습니다.`;
+        seen.add(row.id.trim());
+
+        if (!Number.isFinite(Number(row.pathId))) return `${prefix}: pathId가 올바르지 않습니다.`;
+
+        const sizeParts = row.sizeText.split(',').map((value) => Number(value.trim()));
+        if (sizeParts.length !== 2 || sizeParts.some((value) => !Number.isFinite(value) || value <= 0)) {
+            return `${prefix}: size는 width,height 형식이어야 합니다.`;
+        }
+    }
+
+    return '';
+}
+
+function CatalogEditorDialog({
+    open,
+    onClose,
+    onSaved
+}: {
+    open: boolean;
+    onClose: () => void;
+    onSaved: () => void | Promise<void>;
+}) {
+    const [rows, setRows] = useState<CatalogEditorRow[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const loadRows = async () => {
+        setLoading(true);
+        setError('');
+
+        try {
+            const result = await window.electronAPI.getCatalogEditorData();
+            setRows((result.items || []).map((item: AssetCatalogItem) => toCatalogEditorRow(item)));
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'asset_catalog.json을 불러오지 못했습니다.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (open) {
+            loadRows();
+        }
+    }, [open]);
+
+    const updateRow = (index: number, patch: Partial<CatalogEditorRow>) => {
+        setRows((prev) => prev.map((row, rowIndex) => {
+            if (rowIndex !== index) return row;
+
+            const next = { ...row, ...patch };
+            if ('category' in patch || 'option1Label' in patch) {
+                next.displayLabel = next.displayLabel || [toKoreanCategory(next.category || ''), next.option1Label || next.option1].filter(Boolean).join(' ');
+            }
+            return next;
+        }));
+    };
+
+    const handleImportPreview = async (index: number) => {
+        const row = rows[index];
+        const result = await window.electronAPI.importCatalogPreviewImage({
+            id: row.id,
+            category: row.category || row.type
+        });
+
+        if (!result) return;
+
+        updateRow(index, {
+            preview: result.preview,
+            previewUrl: result.url,
+            sizeText: row.sizeText || (result.size ? `${result.size[0]},${result.size[1]}` : row.sizeText)
+        });
+    };
+
+    const handleSave = async () => {
+        const validationError = validateEditorRows(rows);
+        if (validationError) {
+            setError(validationError);
+            return;
+        }
+
+        setLoading(true);
+        setError('');
+
+        try {
+            await window.electronAPI.saveCatalogEditorData({
+                schemaVersion: 2,
+                items: rows.map(toCatalogItem)
+            });
+            await onSaved();
+            onClose();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'asset_catalog.json 저장에 실패했습니다.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <Dialog open={open} onClose={ignoreBackdropClose(onClose)} maxWidth="xl" fullWidth slotProps={{ paper: { sx: dialogPaperSx } }}>
+            <DialogTitle sx={dialogTitleSx}>비밀 Catalog Editor</DialogTitle>
+            <DialogContent sx={dialogContentSx}>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                    이 창은 앱 표시용 `config/asset_catalog.json`을 편집합니다. 실제 패치 검증은 category별 UnityPy metadata가 기준입니다. 의상/기존 texture는 `metadata/data.tsv`와 option2가 필요하고, UI texture는 `metadata/ui_textures.tsv`의 pathID/PNG 크기와 일치해야 합니다.
+                </Alert>
+                {error && <Typography sx={{ color: 'var(--accent-color)', mb: 2 }}>{error}</Typography>}
+                <Stack spacing={1.5}>
+                    {rows.map((row, index) => (
+                        <Paper key={row.rowId} sx={{ p: 1.5, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
+                            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
+                                <TextField size="small" label="id" value={row.id} onChange={(e) => updateRow(index, { id: e.target.value })} sx={editorFieldSx(170)} />
+                                <TextField size="small" label="표시명" value={row.displayLabel || ''} onChange={(e) => updateRow(index, { displayLabel: e.target.value, label: e.target.value })} sx={editorFieldSx(170)} />
+                                <TextField size="small" label="종류" value={row.category || ''} onChange={(e) => updateRow(index, { category: e.target.value, type: e.target.value })} sx={editorFieldSx(100)} />
+                                <TextField size="small" label="대상 구분" value={row.option1 || ''} onChange={(e) => updateRow(index, { option1: e.target.value, gender: e.target.value })} sx={editorFieldSx(120)} />
+                                <TextField size="small" label="대상 라벨" value={row.option1Label || ''} onChange={(e) => updateRow(index, { option1Label: e.target.value })} sx={editorFieldSx(120)} />
+                                <TextField size="small" label="option2" value={row.option2 || ''} onChange={(e) => updateRow(index, { option2: e.target.value })} sx={editorFieldSx(140)} />
+                                <TextField size="small" label="textureName" value={row.textureName || ''} onChange={(e) => updateRow(index, { textureName: e.target.value })} sx={editorFieldSx(140)} />
+                                <TextField size="small" label="pathId" value={row.pathId} onChange={(e) => updateRow(index, { pathId: e.target.value })} sx={editorFieldSx(90)} />
+                                <TextField size="small" label="size" value={row.sizeText} onChange={(e) => updateRow(index, { sizeText: e.target.value })} sx={editorFieldSx(110)} />
+                                <Chip
+                                    label={getPatchMetadataLabel(row.category || row.type || '')}
+                                    size="small"
+                                    sx={{
+                                        height: 28,
+                                        fontSize: 11,
+                                        background: isUiCategory(row.category || row.type || '')
+                                            ? 'rgba(80, 160, 255, 0.16)'
+                                            : 'rgba(230, 168, 23, 0.16)',
+                                        color: 'var(--text-color)'
+                                    }}
+                                />
+                            </Stack>
+                            <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
+                                <TextField size="small" label="preview" value={row.preview || ''} onChange={(e) => updateRow(index, { preview: e.target.value })} sx={editorFieldSx(300)} />
+                                <Button variant="outlined" onClick={() => handleImportPreview(index)} sx={outlinedButtonSx}>원본 미리보기 선택</Button>
+                                <Button
+                                    variant="outlined"
+                                    startIcon={<DeleteIcon />}
+                                    onClick={() => setRows((prev) => prev.filter((_row, rowIndex) => rowIndex !== index))}
+                                    sx={outlinedButtonSx}
+                                >
+                                    삭제
+                                </Button>
+                                {row.previewUrl && <Box component="img" src={row.previewUrl} sx={editorPreviewSx} />}
+                            </Stack>
+                        </Paper>
+                    ))}
+                </Stack>
+                <Button variant="outlined" onClick={() => setRows((prev) => [...prev, createCatalogEditorRow()])} sx={{ ...outlinedButtonSx, mt: 2 }}>
+                    항목 추가
+                </Button>
+            </DialogContent>
+            <DialogActions sx={dialogActionsSx}>
+                <Button onClick={onClose} sx={outlinedButtonSx}>닫기</Button>
+                <Button variant="contained" onClick={handleSave} disabled={loading} sx={containedButtonSx}>저장</Button>
+            </DialogActions>
+        </Dialog>
+    );
+}
+
+function editorFieldSx(width: number) {
+    return {
+        width,
+        '& .MuiInputBase-root': {
+            color: 'var(--text-color)',
+            background: 'var(--input-bg-color)'
+        },
+        '& .MuiInputLabel-root': {
+            color: 'var(--text-color-light)'
+        },
+        '& .MuiOutlinedInput-notchedOutline': {
+            borderColor: 'var(--border-color)'
+        }
+    };
+}
+
+const editorPreviewSx = {
+    width: 64,
+    height: 64,
+    objectFit: 'contain',
+    border: '1px solid var(--border-color)',
+    borderRadius: 1,
+    background: 'var(--sidebar-bg-color)'
+};
 
 function FontPanel({
     fontTargets,
@@ -1542,12 +2681,14 @@ function PreviewCard({
     title,
     imageUrl,
     emptyText,
-    caption
+    caption,
+    onClick
 }: {
     title: string;
     imageUrl: string;
     emptyText: string;
     caption?: string;
+    onClick?: (imageUrl: string) => void;
 }) {
     return (
         <Box
@@ -1567,13 +2708,15 @@ function PreviewCard({
                 <Box
                     component="img"
                     src={imageUrl}
+                    onClick={() => onClick?.(imageUrl)}
                     sx={{
                         width: '100%',
                         height: 280,
                         objectFit: 'contain',
                         border: '1px solid var(--border-color)',
                         borderRadius: 1,
-                        background: 'var(--sidebar-bg-color)'
+                        background: 'var(--sidebar-bg-color)',
+                        cursor: onClick ? 'zoom-in' : 'default'
                     }}
                 />
             ) : (

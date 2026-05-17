@@ -57,6 +57,8 @@ import DownloadIcon from '@mui/icons-material/Download';
 import UpdateIcon from '@mui/icons-material/SystemUpdateAlt';
 
 import { useNotification } from '../context/NotificationContext';
+import DeveloperGateDialog from '../components/DeveloperGateDialog';
+import { useDeveloperShortcut } from '../hooks/useDeveloperShortcut';
 import type {
     ModFileType,
     ModPackage,
@@ -124,7 +126,7 @@ const selectMenuProps = {
     slotProps: { paper: { sx: menuItemSx } },
 };
 
-const FILE_TYPES: ModFileType[] = ['dll', 'asset', 'mod-info', 'script', 'config', 'folder'];
+const FILE_TYPES: ModFileType[] = ['dll', 'asset', 'mod-info', 'script', 'config', 'folder', 'readme'];
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -193,6 +195,20 @@ type LinkedConfigReconcilePlan = {
     assetCount: number;
     removeCandidates: LinkedConfigReconcileItem[];
     addCandidates: LinkedConfigReconcileItem[];
+};
+
+type ModDistributionForm = {
+    id: string;
+    name: string;
+    author: string;
+    description: string;
+    version: string;
+    zipPath: string;
+    readmeFilePath: string;
+    readmePath: string;
+    downloadPath: string;
+    sha256: string;
+    gameIdsText: string;
 };
 
 type ScriptBuilderFeature = ScriptFeature & {
@@ -879,6 +895,16 @@ function SettingsDialog({ packageId, onClose }: { packageId: string; onClose: ()
 // ── Detail Dialog ──────────────────────────────────────────────────
 
 function DetailDialog({ pkg, onClose }: { pkg: ModPackage; onClose: () => void }) {
+    const [readmeText, setReadmeText] = useState('');
+    const [readmeError, setReadmeError] = useState('');
+
+    useEffect(() => {
+        if (!pkg.readmePath) return;
+        window.electronAPI.getPackageReadme(pkg.id)
+            .then(setReadmeText)
+            .catch((err) => setReadmeError(err instanceof Error ? err.message : 'README를 불러오지 못했습니다.'));
+    }, [pkg.id, pkg.readmePath]);
+
     return (
         <>
         <Dialog
@@ -913,6 +939,34 @@ function DetailDialog({ pkg, onClose }: { pkg: ModPackage; onClose: () => void }
                                 설명
                             </Typography>
                             <Typography sx={{ color: 'var(--text-color)' }}>{pkg.description}</Typography>
+                        </Box>
+                    )}
+                    {pkg.readmePath && (
+                        <Box>
+                            <Typography variant="caption" sx={{ color: 'var(--text-color-light)' }}>
+                                자세한 설명
+                            </Typography>
+                            {readmeError ? (
+                                <Alert severity="warning" sx={{ mt: 0.5 }}>{readmeError}</Alert>
+                            ) : (
+                                <Typography
+                                    component="pre"
+                                    sx={{
+                                        mt: 0.5,
+                                        p: 1,
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: 1,
+                                        background: 'var(--input-bg-color)',
+                                        color: 'var(--text-color)',
+                                        whiteSpace: 'pre-wrap',
+                                        wordBreak: 'break-word',
+                                        fontFamily: 'inherit',
+                                        fontSize: 13,
+                                    }}
+                                >
+                                    {readmeText || 'README를 불러오는 중입니다.'}
+                                </Typography>
+                            )}
                         </Box>
                     )}
                     {pkg.version && (
@@ -1980,6 +2034,43 @@ function PackModDialog({
             return;
         }
 
+        if (selected.toLowerCase().endsWith('.md') || selected.toLowerCase().endsWith('.markdown')) {
+            setSources((prev) => {
+                const next: PackSourceEntry[] = [
+                    ...prev,
+                    {
+                        id: `${Date.now()}-${prev.length}`,
+                        sourcePath: selected,
+                        sourceKind: 'file',
+                        sourceName: fileName,
+                        packageName: baseName,
+                        author,
+                        description: '',
+                        packageType: 'single',
+                        warnings: [],
+                        entries: [
+                            {
+                                entryName: fileName,
+                                sourceEntryName: fileName,
+                                isDirectory: false,
+                                size: 0,
+                                suggestedType: 'readme',
+                                fromModInfo: false,
+                                selectedType: 'readme',
+                                editName: baseName,
+                                editAuthor: author,
+                                editDependsOn: '',
+                            },
+                        ],
+                    },
+                ];
+                if (!validateNextSources(next)) return prev;
+                if (next.length > 1) setPackageType('collection');
+                return next;
+            });
+            return;
+        }
+
         setSources((prev) => {
             const next: PackSourceEntry[] = [
                 ...prev,
@@ -2429,7 +2520,7 @@ function PackModDialog({
                         disabled={packing || loadingZip}
                         sx={{ borderColor: 'var(--border-color)', color: 'var(--text-color)', alignSelf: 'flex-start' }}
                     >
-                        파일 추가 (DLL / ZIP)
+                        파일 추가 (DLL / ZIP / MD)
                     </Button>
 
                     {hasMixedZip && (
@@ -3424,6 +3515,8 @@ function AddModDialog({
     const [onlineLoaded, setOnlineLoaded] = useState(false);
     const [onlineWorkingId, setOnlineWorkingId] = useState<string | null>(null);
     const [onlineError, setOnlineError] = useState('');
+    const [onlineReadme, setOnlineReadme] = useState<{ title: string; text: string } | null>(null);
+    const [onlineReadmeError, setOnlineReadmeError] = useState('');
 
     const [packageType, setPackageType] = useState<'single' | 'collection'>('single');
     const [name, setName] = useState('');
@@ -3506,6 +3599,18 @@ function AddModDialog({
         }
     };
 
+    const handleShowOnlineReadme = async (item: OnlineModCatalogItem) => {
+        if (!item.readmePath) return;
+        setOnlineReadmeError('');
+        setOnlineReadme({ title: item.name, text: 'README를 불러오는 중입니다.' });
+        try {
+            const text = await window.electronAPI.getOnlineModReadme(item.readmePath);
+            setOnlineReadme({ title: item.name, text });
+        } catch (err) {
+            setOnlineReadmeError(err instanceof Error ? err.message : 'README를 불러오지 못했습니다.');
+        }
+    };
+
     const handleClose = () => {
         reset();
         onClose();
@@ -3546,6 +3651,11 @@ function AddModDialog({
             } finally {
                 setLoadingZip(false);
             }
+            return;
+        }
+
+        if (!selected.toLowerCase().endsWith('.dll')) {
+            setError('로컬 모드 추가는 DLL 또는 패킹 ZIP만 지원합니다. MD 파일은 모드 패킹에서 패키지 설명 파일로 추가하세요.');
             return;
         }
 
@@ -3701,6 +3811,7 @@ function AddModDialog({
                                         {item.description || '설명 없음'}
                                     </Typography>
                                 </Box>
+                                <Stack spacing={1} sx={{ alignItems: 'flex-end' }}>
                                 <Button
                                     size="small"
                                     variant={item.updateAvailable || !item.installed ? 'contained' : 'outlined'}
@@ -3730,6 +3841,17 @@ function AddModDialog({
                                 >
                                     {actionLabel}
                                 </Button>
+                                {item.readmePath && (
+                                    <Button
+                                        size="small"
+                                        variant="text"
+                                        onClick={() => void handleShowOnlineReadme(item)}
+                                        sx={{ color: 'var(--primary-color)', minWidth: 0 }}
+                                    >
+                                        자세히보기
+                                    </Button>
+                                )}
+                                </Stack>
                             </Box>
                         </Box>
                     );
@@ -4018,6 +4140,430 @@ function AddModDialog({
                 </Button>
                 )}
             </DialogActions>
+            <Dialog
+                open={Boolean(onlineReadme)}
+                onClose={() => {
+                    setOnlineReadme(null);
+                    setOnlineReadmeError('');
+                }}
+                maxWidth="md"
+                fullWidth
+                slotProps={{ paper: { sx: { ...dialogPaperSx, maxHeight: '80vh' } } }}
+            >
+                <DialogTitle sx={{ color: 'var(--text-color)' }}>{onlineReadme?.title || '자세히보기'}</DialogTitle>
+                <DialogContent>
+                    {onlineReadmeError ? (
+                        <Alert severity="error">{onlineReadmeError}</Alert>
+                    ) : (
+                        <Typography component="pre" sx={{ color: 'var(--text-color)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', fontSize: 13 }}>
+                            {onlineReadme?.text || ''}
+                        </Typography>
+                    )}
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setOnlineReadme(null)} sx={{ color: 'var(--text-color)' }}>닫기</Button>
+                </DialogActions>
+            </Dialog>
+        </Dialog>
+    );
+}
+
+const emptyDistributionForm = (): ModDistributionForm => ({
+    id: '',
+    name: '',
+    author: 'HexX',
+    description: '',
+    version: '1.0.0',
+    zipPath: '',
+    readmeFilePath: '',
+    readmePath: '',
+    downloadPath: '',
+    sha256: '',
+    gameIdsText: 'long-yin-li-zhi-zhuan',
+});
+
+function distributionFormFromItem(item: OnlineModCatalogItem): ModDistributionForm {
+    return {
+        id: item.id,
+        name: item.name,
+        author: item.author,
+        description: item.description,
+        version: item.version,
+        zipPath: '',
+        readmeFilePath: '',
+        readmePath: item.readmePath || '',
+        downloadPath: item.downloadPath,
+        sha256: item.sha256 || '',
+        gameIdsText: (item.gameIds || []).join(', '),
+    };
+}
+
+function parseGameIds(value: string): string[] {
+    return value
+        .split(/[\n,]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function bumpPatchVersion(version: string): string {
+    const match = version.trim().match(/^(v?)(\d+)(?:\.(\d+))?(?:\.(\d+))?(.*)$/i);
+    if (!match) return version.trim() || '1.0.0';
+    const prefix = match[1] || '';
+    const major = Number(match[2] || 0);
+    const minor = Number(match[3] || 0);
+    const patch = Number(match[4] || 0) + 1;
+    const suffix = match[5] || '';
+    return `${prefix}${major}.${minor}.${patch}${suffix}`;
+}
+
+function ModDeveloperToolsDialog({
+    open,
+    onClose,
+    onOpenDistribution,
+}: {
+    open: boolean;
+    onClose: () => void;
+    onOpenDistribution: () => void;
+}) {
+    return (
+        <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth slotProps={{ paper: { sx: dialogPaperSx } }}>
+            <DialogTitle sx={{ color: 'var(--text-color)', fontWeight: 800 }}>개발자 전용 도구</DialogTitle>
+            <DialogContent>
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                    이 창은 온라인 모드 배포 catalog와 packages 폴더를 직접 수정합니다. 변경 후 커밋 전에 생성된 파일 경로와 JSON 내용을 확인하세요.
+                </Alert>
+                <Paper sx={{ p: 1.5, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
+                    <Typography sx={{ color: 'var(--text-color)', fontWeight: 800 }}>온라인 모드 배포</Typography>
+                    <Typography sx={{ color: 'var(--text-color-light)', fontSize: 13, mt: 0.5 }}>
+                        mods/index.json과 mods/packages 폴더를 생성, 수정, 삭제합니다.
+                    </Typography>
+                    <Button
+                        variant="outlined"
+                        onClick={onOpenDistribution}
+                        sx={{ mt: 1, borderColor: 'var(--border-color)', color: 'var(--text-color)' }}
+                    >
+                        열기
+                    </Button>
+                </Paper>
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={onClose} sx={{ color: 'var(--text-color)' }}>닫기</Button>
+            </DialogActions>
+        </Dialog>
+    );
+}
+
+function ModDistributionDialog({
+    open,
+    onClose,
+    onSaved,
+}: {
+    open: boolean;
+    onClose: () => void;
+    onSaved: () => void;
+}) {
+    const [items, setItems] = useState<OnlineModCatalogItem[]>([]);
+    const [selectedId, setSelectedId] = useState('');
+    const [form, setForm] = useState<ModDistributionForm>(() => emptyDistributionForm());
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    const [resultText, setResultText] = useState('');
+
+    const loadItems = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            setItems(await window.electronAPI.getModDistributionCatalog());
+        } catch (err) {
+            setItems([]);
+            setError(err instanceof Error ? err.message : 'mods/index.json을 불러오지 못했습니다.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (open) void loadItems();
+    }, [open]);
+
+    const updateForm = (patch: Partial<ModDistributionForm>) => {
+        setForm((prev) => ({ ...prev, ...patch }));
+    };
+
+    const handleSelectItem = (item: OnlineModCatalogItem) => {
+        setSelectedId(item.id);
+        setForm(distributionFormFromItem(item));
+        setError('');
+        setResultText('');
+    };
+
+    const handleNew = () => {
+        setSelectedId('');
+        setForm(emptyDistributionForm());
+        setError('');
+        setResultText('');
+    };
+
+    const handlePrepareNextVersion = () => {
+        updateForm({
+            version: bumpPatchVersion(form.version),
+            zipPath: '',
+            downloadPath: '',
+            sha256: '',
+        });
+        setError('');
+        setResultText('새 버전 번호를 준비했습니다. 새 ZIP을 선택한 뒤 저장하세요.');
+    };
+
+    const handleSelectZip = async () => {
+        const selected = await window.electronAPI.selectFile('.zip');
+        if (!selected) return;
+        const fileName = selected.split(/[\\/]/).pop() || '';
+        const baseName = fileName.replace(/\.zip$/i, '');
+        updateForm({
+            zipPath: selected,
+            id: form.id || baseName,
+            name: form.name || baseName,
+        });
+    };
+
+    const handleSelectReadme = async () => {
+        const selected = await window.electronAPI.selectFile('.md,.markdown');
+        if (!selected) return;
+        updateForm({ readmeFilePath: selected });
+    };
+
+    const handleSave = async () => {
+        setSaving(true);
+        setError('');
+        setResultText('');
+        try {
+            const result = await window.electronAPI.saveModDistributionItem({
+                id: form.id,
+                name: form.name,
+                author: form.author,
+                description: form.description,
+                version: form.version,
+                zipPath: form.zipPath || undefined,
+                readmeFilePath: form.readmeFilePath || undefined,
+                readmePath: form.readmePath || undefined,
+                downloadPath: form.downloadPath || undefined,
+                sha256: form.sha256 || undefined,
+                gameIds: parseGameIds(form.gameIdsText),
+            });
+            setResultText([
+                `index: ${result.indexPath}`,
+                result.zipPath ? `zip: ${result.zipPath}` : '',
+                `downloadPath: ${result.item.downloadPath}`,
+            ].filter(Boolean).join('\n'));
+            setSelectedId(result.item.id);
+            setForm(distributionFormFromItem(result.item));
+            await loadItems();
+            onSaved();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '온라인 모드 배포 정보 저장 실패');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDelete = async (item: OnlineModCatalogItem) => {
+        const ok = window.confirm(`온라인 catalog에서 삭제할까요?\n${item.name}\n\nmods/packages/${item.id} 폴더도 함께 삭제됩니다.`);
+        if (!ok) return;
+        setSaving(true);
+        setError('');
+        setResultText('');
+        try {
+            const result = await window.electronAPI.deleteModDistributionItem(item.id);
+            setResultText([
+                `index: ${result.indexPath}`,
+                result.deletedPackageDir ? `deleted: ${result.deletedPackageDir}` : '',
+            ].filter(Boolean).join('\n'));
+            if (selectedId === item.id) handleNew();
+            await loadItems();
+            onSaved();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '온라인 모드 삭제 실패');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <Dialog
+            open={open}
+            onClose={onClose}
+            maxWidth="lg"
+            fullWidth
+            slotProps={{ paper: { sx: { ...dialogPaperSx, maxHeight: '88vh' } } }}
+        >
+            <DialogTitle sx={{ color: 'var(--text-color)', fontWeight: 800 }}>온라인 모드 배포 Catalog</DialogTitle>
+            <DialogContent sx={{ pt: 1 }}>
+                <Typography sx={{ color: 'var(--text-color-light)', mb: 2, fontSize: 13 }}>
+                    ZIP을 선택해 배포 파일을 만들면 mods/packages와 mods/index.json이 갱신됩니다. GitHub 반영은 생성된 파일을 커밋하고 push한 뒤 확인하세요.
+                </Typography>
+                {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                    <Paper sx={{ flex: '1 1 42%', minWidth: 320, p: 1.5, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
+                        <Stack direction="row" spacing={1} sx={{ mb: 1, justifyContent: 'space-between' }}>
+                            <Typography sx={{ color: 'var(--text-color)', fontWeight: 800 }}>등록된 온라인 모드</Typography>
+                            <Button size="small" onClick={() => void loadItems()} disabled={loading} sx={{ color: 'var(--text-color)' }}>
+                                새로고침
+                            </Button>
+                        </Stack>
+                        <TableContainer sx={{ maxHeight: 430 }}>
+                            <Table size="small" stickyHeader>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell sx={{ color: 'var(--text-color)', background: 'var(--sidebar-bg-color)' }}>모드</TableCell>
+                                        <TableCell sx={{ color: 'var(--text-color)', background: 'var(--sidebar-bg-color)', width: 90 }}>버전</TableCell>
+                                        <TableCell sx={{ color: 'var(--text-color)', background: 'var(--sidebar-bg-color)', width: 110 }} />
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {items.map((item) => (
+                                        <TableRow
+                                            key={item.id}
+                                            selected={selectedId === item.id}
+                                            hover
+                                            sx={{ cursor: 'pointer' }}
+                                            onClick={() => handleSelectItem(item)}
+                                        >
+                                            <TableCell sx={{ color: 'var(--text-color)' }}>
+                                                <Typography sx={{ fontWeight: 700, fontSize: 13 }}>{item.name}</Typography>
+                                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 11 }}>{item.id}</Typography>
+                                            </TableCell>
+                                            <TableCell sx={{ color: 'var(--text-color-light)' }}>{item.version}</TableCell>
+                                            <TableCell>
+                                                <Button
+                                                    size="small"
+                                                    color="error"
+                                                    disabled={saving}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        void handleDelete(item);
+                                                    }}
+                                                >
+                                                    삭제
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                    {!loading && items.length === 0 && (
+                                        <TableRow>
+                                            <TableCell colSpan={3} sx={{ color: 'var(--text-color-light)', textAlign: 'center', py: 3 }}>
+                                                등록된 온라인 모드가 없습니다.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    </Paper>
+                    <Paper sx={{ flex: '1 1 58%', p: 1.5, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
+                        <Stack direction="row" spacing={1} sx={{ mb: 1, justifyContent: 'space-between' }}>
+                            <Typography sx={{ color: 'var(--text-color)', fontWeight: 800 }}>
+                                {selectedId ? '모드 수정' : '모드 추가'}
+                            </Typography>
+                            <Stack direction="row" spacing={1}>
+                                {selectedId && (
+                                    <Button size="small" onClick={handlePrepareNextVersion} sx={{ color: 'var(--primary-color)' }}>
+                                        다음 버전 준비
+                                    </Button>
+                                )}
+                                <Button size="small" onClick={handleNew} sx={{ color: 'var(--text-color)' }}>새 항목</Button>
+                            </Stack>
+                        </Stack>
+                        <Stack spacing={1.25}>
+                            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
+                                <TextField
+                                    size="small"
+                                    label="id"
+                                    value={form.id}
+                                    disabled={Boolean(selectedId)}
+                                    onChange={(e) => updateForm({ id: e.target.value })}
+                                    helperText={selectedId ? 'id 변경은 새 항목으로 생성하세요.' : ''}
+                                    sx={{ ...inputSx, flex: '1 1 180px' }}
+                                />
+                                <TextField size="small" label="모드 이름" value={form.name} onChange={(e) => updateForm({ name: e.target.value })} sx={{ ...inputSx, flex: '1 1 220px' }} />
+                                <TextField size="small" label="version" value={form.version} onChange={(e) => updateForm({ version: e.target.value })} sx={{ ...inputSx, flex: '1 1 120px' }} />
+                                <TextField size="small" label="제작자" value={form.author} onChange={(e) => updateForm({ author: e.target.value })} sx={{ ...inputSx, flex: '1 1 160px' }} />
+                            </Stack>
+                            <TextField
+                                size="small"
+                                label="설명"
+                                value={form.description}
+                                onChange={(e) => updateForm({ description: e.target.value })}
+                                multiline
+                                minRows={3}
+                                sx={multilineSx}
+                            />
+                            <TextField
+                                size="small"
+                                label="gameIds"
+                                value={form.gameIdsText}
+                                onChange={(e) => updateForm({ gameIdsText: e.target.value })}
+                                helperText="쉼표 또는 줄바꿈으로 구분합니다. 용윤입지전: long-yin-li-zhi-zhuan"
+                                sx={inputSx}
+                            />
+                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                                <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={handleSelectZip} sx={{ borderColor: 'var(--border-color)', color: 'var(--text-color)' }}>
+                                    ZIP 선택
+                                </Button>
+                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12, wordBreak: 'break-all' }}>
+                                    {form.zipPath || 'ZIP을 새로 선택하지 않으면 기존 downloadPath를 유지합니다.'}
+                                </Typography>
+                            </Stack>
+                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                                <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={handleSelectReadme} sx={{ borderColor: 'var(--border-color)', color: 'var(--text-color)' }}>
+                                    README MD 선택
+                                </Button>
+                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12, wordBreak: 'break-all' }}>
+                                    {form.readmeFilePath || '온라인 카드의 자세히보기에서 표시할 MD 파일을 선택할 수 있습니다.'}
+                                </Typography>
+                            </Stack>
+                            <TextField
+                                size="small"
+                                label="readmePath"
+                                value={form.readmePath}
+                                onChange={(e) => updateForm({ readmePath: e.target.value })}
+                                helperText="MD 선택 시 자동 생성됩니다. 기존 항목 metadata만 수정할 때는 유지됩니다."
+                                sx={inputSx}
+                            />
+                            <TextField
+                                size="small"
+                                label="downloadPath"
+                                value={form.downloadPath}
+                                onChange={(e) => updateForm({ downloadPath: e.target.value })}
+                                helperText="ZIP 선택 시 자동 생성됩니다. 기존 항목 metadata만 수정할 때는 유지됩니다."
+                                sx={inputSx}
+                            />
+                            <TextField
+                                size="small"
+                                label="sha256"
+                                value={form.sha256}
+                                onChange={(e) => updateForm({ sha256: e.target.value })}
+                                helperText="ZIP 선택 시 자동 계산됩니다."
+                                sx={inputSx}
+                            />
+                            {resultText && (
+                                <Alert severity="success">
+                                    <Typography component="pre" sx={{ m: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>
+                                        {resultText}
+                                    </Typography>
+                                </Alert>
+                            )}
+                        </Stack>
+                    </Paper>
+                </Stack>
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={onClose} sx={{ color: 'var(--text-color)' }}>닫기</Button>
+                <Button variant="contained" onClick={handleSave} disabled={saving} sx={{ background: 'var(--button-bg-color)', color: 'var(--button-text-color)' }}>
+                    저장
+                </Button>
+            </DialogActions>
         </Dialog>
     );
 }
@@ -4025,6 +4571,10 @@ function AddModDialog({
 // ── Table row cells helper ─────────────────────────────────────────
 
 const cellSx = { py: 0.75, px: 1.5 };
+
+function sanitizeExportFileName(value: string): string {
+    return (value || 'mod').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'mod';
+}
 
 // ── Main Component ─────────────────────────────────────────────────
 
@@ -4035,6 +4585,7 @@ export default function ModManager() {
     const [packages, setPackages] = useState<ModPackage[]>([]);
     const [onlineCatalog, setOnlineCatalog] = useState<OnlineModCatalogItem[]>([]);
     const [updatingPackageId, setUpdatingPackageId] = useState<string | null>(null);
+    const [exportingPackageId, setExportingPackageId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [expandedDependencyIds, setExpandedDependencyIds] = useState<Set<string>>(new Set());
@@ -4042,6 +4593,9 @@ export default function ModManager() {
     const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
     const [addDialogOpen, setAddDialogOpen] = useState(false);
     const [packDialogOpen, setPackDialogOpen] = useState(false);
+    const [developerGateOpen, setDeveloperGateOpen] = useState(false);
+    const [developerToolsOpen, setDeveloperToolsOpen] = useState(false);
+    const [modDistributionOpen, setModDistributionOpen] = useState(false);
     const [detailPkg, setDetailPkg] = useState<ModPackage | null>(null);
     const [settingsPkgId, setSettingsPkgId] = useState<string | null>(null);
 
@@ -4067,6 +4621,8 @@ export default function ModManager() {
             setCurrentLanguage(getSafeLanguage(settings.language));
         });
     }, []);
+
+    useDeveloperShortcut(() => setDeveloperGateOpen(true));
 
     const handleToggleExpand = (id: string) => {
         setExpandedIds((prev) => {
@@ -4142,6 +4698,21 @@ export default function ModManager() {
             showNotification(err instanceof Error ? err.message : '모드 업데이트 실패', 'error');
         } finally {
             setUpdatingPackageId(null);
+        }
+    };
+
+    const handlePackageExport = async (pkg: ModPackage) => {
+        const defaultName = sanitizeExportFileName(`${pkg.name}-${pkg.version || 'export'}`);
+        try {
+            const selected = await window.electronAPI.selectSavePath(defaultName);
+            if (!selected) return;
+            setExportingPackageId(pkg.id);
+            const exportedPath = await window.electronAPI.exportPackage(pkg.id, selected);
+            showNotification(`모드 내보내기 완료: ${exportedPath}`);
+        } catch (err) {
+            showNotification(err instanceof Error ? err.message : '모드 내보내기 실패', 'error');
+        } finally {
+            setExportingPackageId(null);
         }
     };
 
@@ -4228,6 +4799,7 @@ export default function ModManager() {
                             <TableCell sx={{ ...headCellSx, width: 120 }}>버전</TableCell>
                             <TableCell sx={{ ...headCellSx, width: 80 }}>상태</TableCell>
                             <TableCell sx={{ ...headCellSx, width: 92 }}>업데이트</TableCell>
+                            <TableCell sx={{ ...headCellSx, width: 48 }}>내보내기</TableCell>
                             <TableCell sx={{ ...headCellSx, width: 48 }}>설정</TableCell>
                             <TableCell sx={{ ...headCellSx, width: 48 }}>삭제</TableCell>
                         </TableRow>
@@ -4405,6 +4977,24 @@ export default function ModManager() {
                                         )}
                                     </TableCell>
                                     <TableCell sx={cellSx}>
+                                        <Tooltip title="배포용 ZIP으로 내보내기">
+                                            <span>
+                                                <IconButton
+                                                    size="small"
+                                                    disabled={exportingPackageId === pkg.id}
+                                                    onClick={() => void handlePackageExport(pkg)}
+                                                    sx={{ color: 'var(--text-color)' }}
+                                                >
+                                                    {exportingPackageId === pkg.id ? (
+                                                        <CircularProgress size={16} />
+                                                    ) : (
+                                                        <DownloadIcon fontSize="small" />
+                                                    )}
+                                                </IconButton>
+                                            </span>
+                                        </Tooltip>
+                                    </TableCell>
+                                    <TableCell sx={cellSx}>
                                         <Tooltip title={pkg.hasSettings ? '설정' : '설정 없음'}>
                                             <span>
                                                 <IconButton
@@ -4491,6 +5081,7 @@ export default function ModManager() {
                                               <TableCell sx={cellSx} />
                                               <TableCell sx={cellSx} />
                                               <TableCell sx={cellSx} />
+                                              <TableCell sx={cellSx} />
                                           </TableRow>
                                       ))
                                     : []),
@@ -4500,7 +5091,7 @@ export default function ModManager() {
                         {packages.length === 0 && !loading && (
                             <TableRow>
                                 <TableCell
-                                    colSpan={9}
+                                    colSpan={10}
                                     sx={{ color: 'var(--text-color-light)', textAlign: 'center', py: 4 }}
                                 >
                                     표시할 모드가 없습니다.
@@ -4561,6 +5152,17 @@ export default function ModManager() {
                     </ListItemIcon>
                     <ListItemText>모드 설정</ListItemText>
                 </MenuItem>
+                <MenuItem
+                    onClick={() => {
+                        if (ctxPkg) void handlePackageExport(ctxPkg);
+                        setCtxMenu(null);
+                    }}
+                >
+                    <ListItemIcon>
+                        <DownloadIcon fontSize="small" sx={{ color: 'var(--text-color)' }} />
+                    </ListItemIcon>
+                    <ListItemText>내보내기</ListItemText>
+                </MenuItem>
                 <Divider sx={{ borderColor: 'var(--border-color)' }} />
                 <MenuItem
                     onClick={() => {
@@ -4609,6 +5211,30 @@ export default function ModManager() {
                     onClose={() => setSettingsPkgId(null)}
                 />
             )}
+
+            <DeveloperGateDialog
+                open={developerGateOpen}
+                title="개발자 전용 도구"
+                description="온라인 모드 catalog와 배포 ZIP 파일을 직접 수정하는 숨김 도구입니다. 변경 후 커밋 전에 mods/index.json과 packages 경로를 확인하세요."
+                onClose={() => setDeveloperGateOpen(false)}
+                onUnlocked={() => setDeveloperToolsOpen(true)}
+            />
+
+            <ModDeveloperToolsDialog
+                open={developerToolsOpen}
+                onClose={() => setDeveloperToolsOpen(false)}
+                onOpenDistribution={() => setModDistributionOpen(true)}
+            />
+
+            <ModDistributionDialog
+                open={modDistributionOpen}
+                onClose={() => setModDistributionOpen(false)}
+                onSaved={() => {
+                    window.electronAPI.getOnlineModCatalog()
+                        .then(setOnlineCatalog)
+                        .catch(() => setOnlineCatalog([]));
+                }}
+            />
         </Box>
     );
 }

@@ -379,8 +379,29 @@ const checkerboard = {
 
 const twoColumnSx = {
     display: 'grid',
-    gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 2fr) minmax(320px, 1fr)' },
+    gridTemplateColumns: { xs: '1fr', lg: 'minmax(520px, 680px) minmax(520px, 780px)' },
+    justifyContent: 'center',
     gap: 2,
+    width: '100%',
+    maxWidth: 1500,
+    mx: 'auto',
+};
+
+const sidePanelGridSx = {
+    display: 'grid',
+    gridTemplateColumns: { xs: '1fr', xl: 'repeat(2, minmax(0, 1fr))' },
+    gap: 2,
+};
+
+const fullWidthGridItemSx = {
+    gridColumn: { xs: 'auto', xl: '1 / -1' },
+};
+
+const filterRowsGridSx = {
+    display: 'grid',
+    gridTemplateColumns: { xs: '1fr', xl: 'repeat(2, minmax(0, 1fr))' },
+    gap: 1,
+    alignItems: 'start',
 };
 
 const innerTwoColumnSx = {
@@ -614,18 +635,91 @@ function getShapeMetric(diffs: [number, number, number], tolerances: [number, nu
     return Math.sqrt(scaled[0] * scaled[0] + scaled[1] * scaled[1] + scaled[2] * scaled[2]);
 }
 
-function getChromaKeyStrength(r: number, g: number, b: number, chroma: ShotcutVideoFilters['chromaKeyAdvanced'], keyRgb: [number, number, number]): number {
+function getChromaKeySelection(r: number, g: number, b: number, chroma: ShotcutVideoFilters['chromaKeyAdvanced'], keyRgb: [number, number, number]): number {
     const pixelValues = chroma.colorSpace === 1 ? rgbToHci(r, g, b) : [r / 255, g / 255, b / 255] as [number, number, number];
     const keyValues = chroma.colorSpace === 1 ? rgbToHci(keyRgb[0], keyRgb[1], keyRgb[2]) : [keyRgb[0] / 255, keyRgb[1] / 255, keyRgb[2] / 255] as [number, number, number];
     const diffs: [number, number, number] = chroma.colorSpace === 1
         ? [hueDistance(pixelValues[0], keyValues[0]), Math.abs(pixelValues[1] - keyValues[1]), Math.abs(pixelValues[2] - keyValues[2])]
         : [Math.abs(pixelValues[0] - keyValues[0]), Math.abs(pixelValues[1] - keyValues[1]), Math.abs(pixelValues[2] - keyValues[2])];
     const metric = getShapeMetric(diffs, [chroma.deltaR, chroma.deltaG, chroma.deltaB], chroma.shape);
-    const edgeSoftness = chroma.edge <= 0.05 ? 0 : (1 - Math.min(chroma.edge, 0.95)) * 0.35 + chroma.slope;
 
-    if (metric <= 1) return 1;
-    if (edgeSoftness <= 0) return 0;
-    return Math.max(0, Math.min(1, 1 - (metric - 1) / edgeSoftness));
+    if (chroma.edge <= 0.05) return metric <= 1 ? 1 : 0;
+    if (chroma.edge >= 0.85) {
+        const slope = Math.max(0, chroma.slope);
+        if (metric <= 1) return 1;
+        if (slope <= 0) return 0;
+        return Math.max(0, Math.min(1, 1 - (metric - 1) / slope));
+    }
+
+    if (metric >= 1) return 0;
+    const edgeFill = chroma.edge <= 0.4 ? 0.8 : chroma.edge <= 0.65 ? 0.5 : 0.25;
+    return Math.max(0, Math.min(1, 1 - Math.max(0, metric - edgeFill) / Math.max(0.001, 1 - edgeFill)));
+}
+
+function combineAlphaBySelect0rOperation(sourceAlpha: number, selectionAlpha: number, operation: number): number {
+    if (operation <= 0.15) return selectionAlpha;
+    if (operation < 0.4) return Math.max(sourceAlpha, selectionAlpha);
+    if (operation < 0.6) return Math.min(sourceAlpha, selectionAlpha);
+    if (operation < 0.85) return Math.min(1, sourceAlpha + selectionAlpha);
+    return Math.max(0, sourceAlpha - selectionAlpha);
+}
+
+function applyAlphaChannelAdjustPreview(data: ImageData, alpha: ShotcutVideoFilters['alphaChannelAdjust']) {
+    if (!alpha.enabled) return;
+
+    const amount = Math.max(0, Math.min(1, alpha.amount));
+    const threshold = Math.max(0, Math.min(1, alpha.threshold));
+    const sourceAlpha = new Uint8ClampedArray(data.data.length / 4);
+    for (let index = 0, pixel = 0; index < data.data.length; index += 4, pixel += 1) {
+        sourceAlpha[pixel] = data.data[index + 3];
+    }
+
+    const width = data.width;
+    const height = data.height;
+    const radius = Math.max(1, Math.round(amount * 6));
+
+    const sampleNeighborhood = (x: number, y: number, mode: 'min' | 'max' | 'avg') => {
+        let value = mode === 'min' ? 255 : 0;
+        let total = 0;
+        let count = 0;
+        for (let yy = Math.max(0, y - radius); yy <= Math.min(height - 1, y + radius); yy += 1) {
+            for (let xx = Math.max(0, x - radius); xx <= Math.min(width - 1, x + radius); xx += 1) {
+                const alphaValue = sourceAlpha[yy * width + xx];
+                if (mode === 'min') value = Math.min(value, alphaValue);
+                else if (mode === 'max') value = Math.max(value, alphaValue);
+                else {
+                    total += alphaValue;
+                    count += 1;
+                }
+            }
+        }
+        return mode === 'avg' ? Math.round(total / Math.max(1, count)) : value;
+    };
+
+    for (let index = 0, pixel = 0; index < data.data.length; index += 4, pixel += 1) {
+        const currentAlpha = sourceAlpha[pixel];
+        const x = pixel % width;
+        const y = Math.floor(pixel / width);
+        let nextAlpha = currentAlpha;
+
+        if (alpha.operation === 0) {
+            nextAlpha = currentAlpha;
+        } else if (alpha.operation >= 0.79 && alpha.operation < 0.9) {
+            nextAlpha = currentAlpha / 255 < threshold ? 0 : 255;
+        } else if (alpha.operation < 0.25) {
+            nextAlpha = Math.max(0, Math.round(currentAlpha - amount * 255));
+        } else if (alpha.operation < 0.5) {
+            const eroded = sampleNeighborhood(x, y, alpha.operation < 0.35 ? 'min' : 'avg');
+            nextAlpha = alpha.operation < 0.35 && eroded < 255 ? 0 : eroded;
+        } else if (alpha.operation < 0.8) {
+            const dilated = sampleNeighborhood(x, y, alpha.operation < 0.65 ? 'max' : 'avg');
+            nextAlpha = alpha.operation < 0.65 && dilated > 0 ? 255 : Math.max(currentAlpha, dilated);
+        } else if (alpha.operation >= 1) {
+            nextAlpha = sampleNeighborhood(x, y, 'avg');
+        }
+
+        data.data[index + 3] = alpha.invert ? 255 - nextAlpha : nextAlpha;
+    }
 }
 
 function applyImageBackgroundAlphaPreview(data: ImageData, options: ImageBackgroundAlphaPreview) {
@@ -656,7 +750,6 @@ function buildCanvasPreviewOptions(
 function applyApproximateShotcutPreview(data: ImageData, options: ShotcutPreviewOptions, maskData?: Uint8ClampedArray) {
     const chroma = options.filters.chromaKeyAdvanced;
     const spill = options.filters.keySpillAdvanced;
-    const alpha = options.filters.alphaChannelAdjust;
     const chromaRgb = chroma.enabled ? hexToRgb(chroma.keyColor) : null;
     const spillRgb = spill.enabled ? hexToRgb(spill.keyColor) : null;
     const targetRgb = spill.enabled ? hexToRgb(spill.targetColor) : null;
@@ -670,9 +763,10 @@ function applyApproximateShotcutPreview(data: ImageData, options: ShotcutPreview
         const b = data.data[i + 2];
 
         if (chromaRgb && maskAllowsChroma) {
-            const selectedStrength = getChromaKeyStrength(r, g, b, chroma, chromaRgb);
-            const keyStrength = chroma.invert ? 1 - selectedStrength : selectedStrength;
-            if (keyStrength > 0) data.data[i + 3] = Math.round(data.data[i + 3] * (1 - keyStrength));
+            const selectedStrength = getChromaKeySelection(r, g, b, chroma, chromaRgb);
+            const currentAlpha = data.data[i + 3] / 255;
+            const selectionAlpha = chroma.invert ? selectedStrength : 1 - selectedStrength;
+            data.data[i + 3] = Math.round(combineAlphaBySelect0rOperation(currentAlpha, selectionAlpha, chroma.operation) * 255);
         }
 
         if (spillRgb && targetRgb) {
@@ -685,23 +779,6 @@ function applyApproximateShotcutPreview(data: ImageData, options: ShotcutPreview
             }
         }
 
-        if (alpha.enabled) {
-            const currentAlpha = data.data[i + 3];
-            const amount = Math.max(0, Math.min(1, alpha.amount));
-            if (alpha.operation === 0) {
-                data.data[i + 3] = currentAlpha;
-            } else if (alpha.operation >= 0.79 && alpha.operation < 0.9) {
-                data.data[i + 3] = currentAlpha / 255 < alpha.threshold ? 0 : 255;
-            } else if (alpha.operation <= 0.4) {
-                data.data[i + 3] = Math.max(0, Math.round(currentAlpha - amount * 255));
-            } else if (alpha.operation >= 0.6 && alpha.operation < 0.8) {
-                data.data[i + 3] = Math.min(255, Math.round(currentAlpha + amount * 255 * (1 - currentAlpha / 255)));
-            } else if (alpha.operation >= 1) {
-                data.data[i + 3] = Math.round(currentAlpha * (1 - amount) + 255 * amount);
-            }
-            if (alpha.invert) data.data[i + 3] = 255 - data.data[i + 3];
-        }
-
         const grading = options.filters.colorGrading;
         if (grading.enabled) {
             data.data[i] = applyColorGradingChannel(data.data[i], grading.lift.r, grading.gamma.r, grading.gain.r);
@@ -709,6 +786,8 @@ function applyApproximateShotcutPreview(data: ImageData, options: ShotcutPreview
             data.data[i + 2] = applyColorGradingChannel(data.data[i + 2], grading.lift.b, grading.gamma.b, grading.gain.b);
         }
     }
+
+    applyAlphaChannelAdjustPreview(data, options.filters.alphaChannelAdjust);
 }
 
 function useOverlayShortcuts(setOverlays: Dispatch<SetStateAction<OverlayState>>) {
@@ -1240,13 +1319,17 @@ function VideoTimeline({
 function ColorWheelPanel({
     title,
     value,
+    expanded,
     language,
+    onToggleExpanded,
     onChange,
     onReset,
 }: {
     title: string;
     value: Record<ColorChannel, number>;
+    expanded: boolean;
     language: LanguageCode;
+    onToggleExpanded: () => void;
     onChange: (value: Record<ColorChannel, number>) => void;
     onReset: () => void;
 }) {
@@ -1285,80 +1368,91 @@ function ColorWheelPanel({
     return (
         <Paper sx={{ ...innerPanelSx, p: 1.25 }}>
             <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 700 }}>{title}</Typography>
-                <Button size="small" variant="outlined" sx={outlinedButtonSx} onClick={onReset}>
-                    {t('graphics.filters.groupReset', language)}
-                </Button>
-            </Stack>
-            <Stack direction="row" spacing={1.25} sx={{ alignItems: 'stretch' }}>
-                <Box
-                    ref={wheelRef}
-                    onPointerDown={(event) => {
-                        event.currentTarget.setPointerCapture(event.pointerId);
-                        setFromWheelPointer(event);
-                    }}
-                    onPointerMove={(event) => {
-                        if (event.buttons !== 1) return;
-                        setFromWheelPointer(event);
-                    }}
-                    sx={{
-                        position: 'relative',
-                        width: 'min(100%, 180px)',
-                        aspectRatio: '1 / 1',
-                        borderRadius: '50%',
-                        background:
-                            'radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 62%), conic-gradient(red, magenta, blue, cyan, lime, yellow, red)',
-                        border: '1px solid var(--border-color)',
-                        boxShadow: 'inset 0 0 18px rgba(0,0,0,0.28)',
-                        cursor: 'crosshair',
-                        touchAction: 'none',
-                    }}
-                >
-                    <Box
-                        sx={{
-                            position: 'absolute',
-                            left: pointerX,
-                            top: pointerY,
-                            width: 10,
-                            height: 10,
-                            borderRadius: '50%',
-                            background: 'var(--text-color)',
-                            border: '2px solid var(--bg-color)',
-                            transform: 'translate(-50%, -50%)',
-                            boxShadow: '0 0 0 1px var(--border-color)',
-                            pointerEvents: 'none',
-                        }}
-                    />
-                </Box>
-                <Stack spacing={0.5} sx={{ alignItems: 'center', minWidth: 44 }}>
-                    <Typography sx={{ color: 'var(--text-color-light)', fontSize: 11 }}>{t('graphics.filters.master', language)}</Typography>
-                    <Slider
-                        orientation="vertical"
-                        value={master}
-                        min={-100}
-                        max={100}
-                        step={0.1}
-                        onChange={(_, next) => setMaster(Array.isArray(next) ? next[0] : next)}
-                        sx={{ ...sliderSx, height: 160 }}
-                    />
+                <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', minWidth: 0 }}>
+                    <IconButton size="small" sx={{ color: 'var(--text-color-light)' }} onClick={onToggleExpanded}>
+                        {expanded ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
+                    </IconButton>
+                    <Typography sx={{ fontSize: 13, fontWeight: 700, minWidth: 0 }}>{title}</Typography>
                 </Stack>
+                {expanded && (
+                    <Button size="small" variant="outlined" sx={outlinedButtonSx} onClick={onReset}>
+                        {t('graphics.filters.groupReset', language)}
+                    </Button>
+                )}
             </Stack>
-            <Stack spacing={0.25} sx={{ mt: 1 }}>
-                {(['r', 'g', 'b'] as const).map((channel) => (
-                    <ControlSlider
-                        key={`${title}-${channel}`}
-                        label={channel.toUpperCase()}
-                        value={value[channel]}
-                        min={-100}
-                        max={100}
-                        step={0.1}
-                        decimals={1}
-                        suffix="%"
-                        showInput
-                        onChange={(nextValue) => setChannel(channel, nextValue)}
-                    />
-                ))}
-            </Stack>
+            {expanded && (
+                <>
+                    <Stack direction="row" spacing={1.25} sx={{ alignItems: 'stretch' }}>
+                        <Box
+                            ref={wheelRef}
+                            onPointerDown={(event) => {
+                                event.currentTarget.setPointerCapture(event.pointerId);
+                                setFromWheelPointer(event);
+                            }}
+                            onPointerMove={(event) => {
+                                if (event.buttons !== 1) return;
+                                setFromWheelPointer(event);
+                            }}
+                            sx={{
+                                position: 'relative',
+                                width: 'min(100%, 180px)',
+                                aspectRatio: '1 / 1',
+                                borderRadius: '50%',
+                                background:
+                                    'radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 62%), conic-gradient(red, magenta, blue, cyan, lime, yellow, red)',
+                                border: '1px solid var(--border-color)',
+                                boxShadow: 'inset 0 0 18px rgba(0,0,0,0.28)',
+                                cursor: 'crosshair',
+                                touchAction: 'none',
+                            }}
+                        >
+                            <Box
+                                sx={{
+                                    position: 'absolute',
+                                    left: pointerX,
+                                    top: pointerY,
+                                    width: 10,
+                                    height: 10,
+                                    borderRadius: '50%',
+                                    background: 'var(--text-color)',
+                                    border: '2px solid var(--bg-color)',
+                                    transform: 'translate(-50%, -50%)',
+                                    boxShadow: '0 0 0 1px var(--border-color)',
+                                    pointerEvents: 'none',
+                                }}
+                            />
+                        </Box>
+                        <Stack spacing={0.5} sx={{ alignItems: 'center', minWidth: 44 }}>
+                            <Typography sx={{ color: 'var(--text-color-light)', fontSize: 11 }}>{t('graphics.filters.master', language)}</Typography>
+                            <Slider
+                                orientation="vertical"
+                                value={master}
+                                min={-100}
+                                max={100}
+                                step={0.1}
+                                onChange={(_, next) => setMaster(Array.isArray(next) ? next[0] : next)}
+                                sx={{ ...sliderSx, height: 160 }}
+                            />
+                        </Stack>
+                    </Stack>
+                    <Stack spacing={0.25} sx={{ mt: 1 }}>
+                        {(['r', 'g', 'b'] as const).map((channel) => (
+                            <ControlSlider
+                                key={`${title}-${channel}`}
+                                label={channel.toUpperCase()}
+                                value={value[channel]}
+                                min={-100}
+                                max={100}
+                                step={0.1}
+                                decimals={1}
+                                suffix="%"
+                                showInput
+                                onChange={(nextValue) => setChannel(channel, nextValue)}
+                            />
+                        ))}
+                    </Stack>
+                </>
+            )}
         </Paper>
     );
 }
@@ -1372,6 +1466,12 @@ function ColorGradingControl({
     language: LanguageCode;
     onChange: (value: ShotcutVideoFilters['colorGrading']) => void;
 }) {
+    const [expandedGroups, setExpandedGroups] = useState<Record<ColorGradingGroup, boolean>>({
+        lift: true,
+        gamma: true,
+        gain: true,
+    });
+
     const setGroup = (group: ColorGradingGroup, groupValue: Record<ColorChannel, number>) => {
         onChange({ ...value, [group]: groupValue });
     };
@@ -1387,7 +1487,9 @@ function ColorGradingControl({
                     key={group}
                     title={t(`graphics.filters.${group}` as any, language)}
                     value={value[group]}
+                    expanded={expandedGroups[group]}
                     language={language}
+                    onToggleExpanded={() => setExpandedGroups((prev) => ({ ...prev, [group]: !prev[group] }))}
                     onChange={(groupValue) => setGroup(group, groupValue)}
                     onReset={() => resetGroup(group)}
                 />
@@ -1579,12 +1681,14 @@ function OverlaySettingsPanel({
 function CanvasFilteredMedia({
     media,
     mediaKind,
+    transform,
     onPlaybackState,
     onVideoControllerReady,
     preview,
 }: {
     media: GraphicsFile;
     mediaKind: 'video' | 'image';
+    transform: PortraitTransform;
     onPlaybackState?: (state: PlaybackState) => void;
     onVideoControllerReady?: (controller: VideoPreviewController | null) => void;
     preview: ShotcutPreviewOptions;
@@ -1902,7 +2006,24 @@ function CanvasFilteredMedia({
                         maskScratch.height = targetHeight;
                         const maskCtx = maskScratch.getContext('2d');
                         if (maskCtx) {
-                            maskCtx.drawImage(maskCanvas, 0, 0, targetWidth, targetHeight);
+                            const mediaWidthOnPortrait = 1200 * (transform.scale / 100);
+                            const mediaHeightOnPortrait = mediaWidthOnPortrait * (naturalHeight / naturalWidth);
+                            const sourceX = (1200 - mediaWidthOnPortrait) / 2 + transform.x;
+                            const sourceY = (1500 - mediaHeightOnPortrait) / 2 + transform.y;
+                            const cropX = Math.max(0, sourceX);
+                            const cropY = Math.max(0, sourceY);
+                            const cropRight = Math.min(1200, sourceX + mediaWidthOnPortrait);
+                            const cropBottom = Math.min(1500, sourceY + mediaHeightOnPortrait);
+                            const cropWidth = Math.max(0, cropRight - cropX);
+                            const cropHeight = Math.max(0, cropBottom - cropY);
+                            const destX = ((cropX - sourceX) / mediaWidthOnPortrait) * targetWidth;
+                            const destY = ((cropY - sourceY) / mediaHeightOnPortrait) * targetHeight;
+                            const destWidth = (cropWidth / mediaWidthOnPortrait) * targetWidth;
+                            const destHeight = (cropHeight / mediaHeightOnPortrait) * targetHeight;
+                            maskCtx.clearRect(0, 0, targetWidth, targetHeight);
+                            if (cropWidth > 0 && cropHeight > 0) {
+                                maskCtx.drawImage(maskCanvas, cropX, cropY, cropWidth, cropHeight, destX, destY, destWidth, destHeight);
+                            }
                             maskData = maskCtx.getImageData(0, 0, targetWidth, targetHeight).data;
                         }
                     }
@@ -1942,7 +2063,7 @@ function CanvasFilteredMedia({
             const video = videoRef.current as VideoFrameCallbackVideo | null;
             if (videoFrameId && video?.cancelVideoFrameCallback) video.cancelVideoFrameCallback(videoFrameId);
         };
-    }, [media.url, mediaKind, preview]);
+    }, [media.url, mediaKind, preview, transform]);
 
     return (
         <>
@@ -2146,6 +2267,7 @@ function PortraitCanvas({
                         <CanvasFilteredMedia
                             media={media}
                             mediaKind={mediaKind}
+                            transform={transform}
                             onPlaybackState={onPlaybackState}
                             onVideoControllerReady={onVideoControllerReady}
                             preview={shotcutPreviewFilters}
@@ -2689,16 +2811,16 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
             </Box>
 
             <Box>
-                <Stack spacing={2}>
+                <Box sx={sidePanelGridSx}>
                     <TransformPanel transform={transform} onChange={setTransform} language={currentLanguage} />
                     <OverlaySettingsPanel overlays={overlays} onChange={setOverlays} language={currentLanguage} />
 
-                    <Paper sx={{ ...panelSx, p: 2 }}>
+                    <Paper sx={{ ...panelSx, ...fullWidthGridItemSx, p: 2 }}>
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
                             <ColorizeIcon sx={{ color: 'var(--primary-color)' }} />
                             <Typography sx={{ fontWeight: 700 }}>{t('graphics.filters.title', currentLanguage)}</Typography>
                         </Stack>
-                        <Stack spacing={1}>
+                        <Box sx={filterRowsGridSx}>
                             {filterRegistry.map((filter) => {
                                 const disabled = isFrei0rFilterDisabled(filter);
                                 const expanded = Boolean(expandedFilters[filter.id]);
@@ -2814,7 +2936,7 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
                                     </ShotcutFilterRow>
                                 );
                             })}
-                        </Stack>
+                        </Box>
                         <FormControl fullWidth size="small" sx={{ mt: 1 }}>
                             <InputLabel sx={{ color: 'var(--text-color-light)' }}>{t('graphics.filters.colorPreset', currentLanguage)}</InputLabel>
                             <Select value={colorPreset} label={t('graphics.filters.colorPreset', currentLanguage)} onChange={(event) => setColorPreset(event.target.value)} sx={selectSx}>
@@ -2829,7 +2951,7 @@ function VideoTool({ assets }: { assets: GraphicsAssets | null }) {
                             {t('graphics.filters.currentPreset', currentLanguage)} {selectedColorPreset ? getColorPresetLabel(selectedColorPreset, currentLanguage) : colorPreset}. {t('graphics.filters.previewNote', currentLanguage)}
                         </Typography>
                     </Paper>
-                </Stack>
+                </Box>
             </Box>
 
             <Dialog open={loopDialogOpen} onClose={() => setLoopDialogOpen(false)} slotProps={{ paper: { sx: dialogPaperSx } }}>
@@ -3042,11 +3164,13 @@ function ImageTool({ assets }: { assets: GraphicsAssets | null }) {
             </Box>
 
             <Box>
-                <Stack spacing={2}>
-                    <OutputPanel preset={preset} onChange={setPreset} language={currentLanguage} />
+                <Box sx={sidePanelGridSx}>
+                    <Box sx={fullWidthGridItemSx}>
+                        <OutputPanel preset={preset} onChange={setPreset} language={currentLanguage} />
+                    </Box>
                     <TransformPanel transform={transform} onChange={setTransform} language={currentLanguage} />
                     <OverlaySettingsPanel overlays={overlays} onChange={setOverlays} language={currentLanguage} />
-                    <Paper sx={{ ...panelSx, p: 2 }}>
+                    <Paper sx={{ ...panelSx, ...fullWidthGridItemSx, p: 2 }}>
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
                             <ColorizeIcon sx={{ color: 'var(--primary-color)' }} />
                             <Typography sx={{ fontWeight: 700 }}>{t('graphics.image.backgroundAlpha', currentLanguage)}</Typography>
@@ -3056,7 +3180,7 @@ function ImageTool({ assets }: { assets: GraphicsAssets | null }) {
                         <ControlSlider label={t('graphics.filters.tolerance', currentLanguage)} value={tolerance} min={0} max={255} onChange={setTolerance} />
                         <ControlSlider label={t('graphics.image.edgeSoftness', currentLanguage)} value={softness} min={0} max={160} onChange={setSoftness} />
                     </Paper>
-                </Stack>
+                </Box>
             </Box>
         </Box>
     );
@@ -3343,7 +3467,7 @@ export default function GraphicsTool() {
     }, [currentLanguage, showNotification]);
 
     return (
-        <Box>
+        <Box sx={{ width: '100%', maxWidth: 1480, mx: 'auto' }}>
             <Typography variant="h5" sx={{ fontWeight: 800, color: 'var(--text-color)' }}>
                 {t('nav.visualForge', currentLanguage)}
             </Typography>

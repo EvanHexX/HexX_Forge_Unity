@@ -26,6 +26,7 @@ export type OnlineModCatalogItem = {
     description: string;
     version: string;
     downloadPath: string;
+    readmePath?: string;
     sha256?: string;
     gameIds?: string[];
     installedPackageId?: string;
@@ -39,10 +40,80 @@ type OnlineModCatalogFile = {
     mods: OnlineModCatalogItem[];
 };
 
+export type ModDistributionInput = {
+    id: string;
+    name: string;
+    author: string;
+    description: string;
+    version: string;
+    zipPath?: string;
+    readmeFilePath?: string;
+    readmePath?: string;
+    downloadPath?: string;
+    sha256?: string;
+    gameIds?: string[];
+};
+
+export type ModDistributionResult = {
+    item: OnlineModCatalogItem;
+    indexPath: string;
+    zipPath?: string;
+};
+
 function ensureDownloadDir(): void {
     if (!fs.existsSync(DOWNLOAD_DIR)) {
         fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
     }
+}
+
+function ensureDir(dirPath: string): void {
+    if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+    }
+}
+
+function sanitizeFilePart(value: string): string {
+    return value
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/[^a-zA-Z0-9_.-]/g, '_')
+        .trim();
+}
+
+function hashFile(filePath: string): string {
+    const hash = crypto.createHash('sha256');
+    hash.update(fs.readFileSync(filePath));
+    return hash.digest('hex');
+}
+
+function getDistributionRoot(): string {
+    const candidates = [
+        path.join(process.cwd(), 'mods'),
+        path.resolve(__dirname, '..', '..', '..', 'mods'),
+        path.resolve(__dirname, '..', '..', 'mods'),
+    ];
+    return candidates.find((candidate) => fs.existsSync(path.join(candidate, 'index.json'))) ?? candidates[0];
+}
+
+function readDistributionIndex(): OnlineModCatalogFile {
+    const distributionRoot = getDistributionRoot();
+    const indexPath = path.join(distributionRoot, 'index.json');
+    if (!fs.existsSync(indexPath)) {
+        return { schemaVersion: 1, mods: [] };
+    }
+
+    const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf-8')) as OnlineModCatalogFile;
+    if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.mods)) {
+        throw new Error('mods/index.json 형식이 올바르지 않습니다.');
+    }
+    return parsed;
+}
+
+function writeDistributionIndex(index: OnlineModCatalogFile): string {
+    const distributionRoot = getDistributionRoot();
+    ensureDir(distributionRoot);
+    const indexPath = path.join(distributionRoot, 'index.json');
+    fs.writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`, 'utf-8');
+    return indexPath;
 }
 
 function compareVersions(a: string, b: string): number {
@@ -166,4 +237,104 @@ export async function updateOnlineMod(item: OnlineModCatalogItem): Promise<ModPa
         return setPackageEnabled(updated.id, true).packages;
     }
     return packages;
+}
+
+export async function getOnlineModReadme(readmePath: string): Promise<string> {
+    const normalized = readmePath.replace(/^\/+/, '');
+    if (!normalized || !normalized.toLowerCase().endsWith('.md')) {
+        throw new Error('온라인 README 경로가 올바르지 않습니다.');
+    }
+    const response = await fetch(`${CATALOG_BASE_URL}/${normalized}`, {
+        headers: { 'user-agent': 'HexX-Forge' },
+    });
+    if (!response.ok) {
+        throw new Error(`온라인 README 요청 실패: ${response.status}`);
+    }
+    return response.text();
+}
+
+export function getModDistributionCatalog(): OnlineModCatalogItem[] {
+    return readDistributionIndex().mods.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function saveModDistributionItem(input: ModDistributionInput): ModDistributionResult {
+    const id = sanitizeFilePart(input.id.trim());
+    const version = sanitizeFilePart(input.version.trim());
+    const name = input.name.trim();
+    const author = input.author.trim();
+    const description = input.description.trim();
+
+    if (!id) throw new Error('모드 id를 입력하세요.');
+    if (!name) throw new Error('모드 이름을 입력하세요.');
+    if (!author) throw new Error('제작자를 입력하세요.');
+    if (!description) throw new Error('설명을 입력하세요.');
+    if (!version) throw new Error('version을 입력하세요.');
+
+    let zipPath: string | undefined;
+    let downloadPath = input.downloadPath?.trim() || '';
+    let readmePath = input.readmePath?.trim() || undefined;
+    let sha256 = input.sha256?.trim() || undefined;
+
+    if (input.zipPath) {
+        if (!fs.existsSync(input.zipPath)) throw new Error('배포할 모드 ZIP 파일을 찾을 수 없습니다.');
+        const packageDir = path.join(getDistributionRoot(), 'packages', id, version);
+        fs.rmSync(packageDir, { recursive: true, force: true });
+        ensureDir(packageDir);
+        zipPath = path.join(packageDir, `${id}.${version}.zip`);
+        fs.copyFileSync(input.zipPath, zipPath);
+        downloadPath = `mods/packages/${id}/${version}/${id}.${version}.zip`;
+        sha256 = hashFile(zipPath);
+    }
+
+    if (input.readmeFilePath) {
+        if (!fs.existsSync(input.readmeFilePath)) throw new Error('README md 파일을 찾을 수 없습니다.');
+        const readmeDir = path.join(getDistributionRoot(), 'readmes', id, version);
+        ensureDir(readmeDir);
+        const readmeName = `${id}.${version}.md`;
+        const readmeTargetPath = path.join(readmeDir, readmeName);
+        fs.copyFileSync(input.readmeFilePath, readmeTargetPath);
+        readmePath = `mods/readmes/${id}/${version}/${readmeName}`;
+    }
+
+    if (!downloadPath) {
+        throw new Error('ZIP을 선택하거나 downloadPath를 입력하세요.');
+    }
+
+    const item: OnlineModCatalogItem = {
+        id,
+        name,
+        author,
+        description,
+        version,
+        downloadPath,
+        readmePath,
+        sha256,
+        gameIds: input.gameIds?.map((value) => value.trim()).filter(Boolean),
+    };
+
+    const index = readDistributionIndex();
+    const filtered = index.mods.filter((existing) => existing.id !== id);
+    filtered.push(item);
+    filtered.sort((a, b) => a.name.localeCompare(b.name));
+    const indexPath = writeDistributionIndex({ schemaVersion: 1, mods: filtered });
+
+    return { item, indexPath, zipPath };
+}
+
+export function deleteModDistributionItem(id: string): { indexPath: string; deletedPackageDir?: string } {
+    const normalizedId = sanitizeFilePart(id.trim());
+    if (!normalizedId) throw new Error('삭제할 모드 id가 없습니다.');
+
+    const index = readDistributionIndex();
+    const filtered = index.mods.filter((item) => item.id !== normalizedId);
+    const indexPath = writeDistributionIndex({ schemaVersion: 1, mods: filtered });
+
+    const packageDir = path.join(getDistributionRoot(), 'packages', normalizedId);
+    let deletedPackageDir: string | undefined;
+    if (fs.existsSync(packageDir)) {
+        fs.rmSync(packageDir, { recursive: true, force: true });
+        deletedPackageDir = packageDir;
+    }
+
+    return { indexPath, deletedPackageDir };
 }

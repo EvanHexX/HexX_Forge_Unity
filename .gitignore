@@ -1,3 +1,10 @@
+# Local app/dev settings
+config/app_settings.json
+config/developer_access.json
+developer_access.json
+.ai/
+.claude/settings.local.json
+
 # Logs
 logs
 *.log
@@ -15,8 +22,19 @@ release
 # AssetManager temporary/generated output
 resources/tools/AssetManager/work/
 resources/tools/AssetManager/reports/
+resources/tools/AssetManager/originals/
 resources/tools/AssetManager/**/*.report.json
 resources/tools/AssetManager/**/__pycache__/
+
+# External tool distributions
+resources/tools/ffmpeg/*
+!resources/tools/ffmpeg/README.md
+resources/tools/frei0r/*
+!resources/tools/frei0r/README.md
+
+# Runtime user data
+storage/
+temp_asset_graphicTool/
 
 # OS/cache noise
 resources/**/.DS_Store
@@ -156,13 +174,8 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
-<<<<<<< HEAD
 
-# ==========================================
-# JetBrains (WebStorm, etc.) & AI Tools
-# ==========================================
-
-# JetBrains IDEs (.idea folder)
+# JetBrains IDEs
 .idea/
 *.iml
 *.iws
@@ -175,5 +188,3 @@ build/
 .DS_Store
 Thumbs.db
 desktop.ini
-=======
->>>>>>> ad087a28b5fb3d04ef1c1dc46b16e47df49a6531

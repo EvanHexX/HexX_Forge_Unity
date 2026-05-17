@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "items": [
+    {
+      "catalogId": "female_outfit_skeleton_17",
+      "enabled": true,
+      "gender": "female",
+      "category": "outfit",
+      "option2": "천산파",
+      "textureName": "skeleton_17",
+      "label": "천산파 여성 의상",
+      "sortOrder": 100
+    },
+    {
+      "catalogId": "male_outfit_skeleton_17",
+      "enabled": true,
+      "gender": "male",
+      "category": "outfit",
+      "option2": "천산파",
+      "textureName": "skeleton_17",
+      "label": "천산파 남성 의상",
+      "sortOrder": 110
+    },
+    {
+      "catalogId": "test_any_text_01234",
+      "enabled": false,
+      "gender": "female",
+      "category": "outfit",
+      "option2": "테스트",
+      "textureName": "skeleton_test",
+      "label": "테스트용 항목",
+      "tags": ["dev", "test"]
+    }
+  ]
+}

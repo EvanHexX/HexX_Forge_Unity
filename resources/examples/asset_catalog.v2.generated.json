@@ -1,0 +1,1502 @@
+{
+  "schemaVersion": 2,
+  "source": "data.tsv",
+  "items": [
+    {
+      "id": "female_outfit_강완_skeleton_1024",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "강완",
+      "label": "강완 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1024,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_개방_skeleton_12_139",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "개방",
+      "label": "개방 여성 의상 원본",
+      "textureName": "skeleton_12",
+      "pathId": 139,
+      "size": [
+        1012,
+        2065
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_거경방_작업복_skeleton_6_97",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "거경방/작업복",
+      "label": "거경방/작업복 여성 의상 원본",
+      "textureName": "skeleton_6",
+      "pathId": 97,
+      "size": [
+        3601,
+        323
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_공동파_skeleton_19_122",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "공동파",
+      "label": "공동파 여성 의상 원본",
+      "textureName": "skeleton_19",
+      "pathId": 122,
+      "size": [
+        1422,
+        1062
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_금강밀종_skeleton_26_127",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "금강밀종",
+      "label": "금강밀종 여성 의상 원본",
+      "textureName": "skeleton_26",
+      "pathId": 127,
+      "size": [
+        802,
+        2073
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_금룡방_상인복_skeleton_5_92",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "금룡방/상인복",
+      "label": "금룡방/상인복 여성 의상 원본",
+      "textureName": "skeleton_5",
+      "pathId": 92,
+      "size": [
+        3903,
+        465
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_기타_skeleton_14_96",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "기타",
+      "label": "기타 여성 의상 원본",
+      "textureName": "skeleton_14",
+      "pathId": 96,
+      "size": [
+        3917,
+        703
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_기타_skeleton_30_95",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "기타",
+      "label": "기타 여성 의상 원본",
+      "textureName": "skeleton_30",
+      "pathId": 95,
+      "size": [
+        4033,
+        1162
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_당문_skeleton_15_113",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "당문",
+      "label": "당문 여성 의상 원본",
+      "textureName": "skeleton_15",
+      "pathId": 113,
+      "size": [
+        1496,
+        1051
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_대은각_skeleton_16_107",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "대은각",
+      "label": "대은각 여성 의상 원본",
+      "textureName": "skeleton_16",
+      "pathId": 107,
+      "size": [
+        1826,
+        1058
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_모산파_skeleton_22_91",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "모산파",
+      "label": "모산파 여성 의상 원본",
+      "textureName": "skeleton_22",
+      "pathId": 91,
+      "size": [
+        3964,
+        464
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_모용성진_skeleton_1171",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "모용성진",
+      "label": "모용성진 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1171,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_무당파_skeleton_20_106",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "무당파",
+      "label": "무당파 여성 의상 원본",
+      "textureName": "skeleton_20",
+      "pathId": 106,
+      "size": [
+        4017,
+        503
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_백마홍장_skeleton_123",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "백마홍장",
+      "label": "백마홍장 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 123,
+      "size": [
+        2102,
+        1121
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_백운천_skeleton_966",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "백운천",
+      "label": "백운천 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 966,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_벽력당_skeleton_32_142",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "벽력당",
+      "label": "벽력당 여성 의상 원본",
+      "textureName": "skeleton_32",
+      "pathId": 142,
+      "size": [
+        1024,
+        2048
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_복우파_농민복_skeleton_4_151",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "복우파/농민복",
+      "label": "복우파/농민복 여성 의상 원본",
+      "textureName": "skeleton_4",
+      "pathId": 151,
+      "size": [
+        533,
+        1863
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_봉래파_skeleton_24_80",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "봉래파",
+      "label": "봉래파 여성 의상 원본",
+      "textureName": "skeleton_24",
+      "pathId": 80,
+      "size": [
+        919,
+        2076
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_비룡문_skeleton_33_79",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "비룡문",
+      "label": "비룡문 여성 의상 원본",
+      "textureName": "skeleton_33",
+      "pathId": 79,
+      "size": [
+        4096,
+        512
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_상관봉_skeleton_829",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "상관봉",
+      "label": "상관봉 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 829,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_신기문_skeleton_21_161",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "신기문",
+      "label": "신기문 여성 의상 원본",
+      "textureName": "skeleton_21",
+      "pathId": 161,
+      "size": [
+        1542,
+        1096
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_아미파_skeleton_18_90",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "아미파",
+      "label": "아미파 여성 의상 원본",
+      "textureName": "skeleton_18",
+      "pathId": 90,
+      "size": [
+        684,
+        2089
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_약왕곡_skeleton_23_150",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "약왕곡",
+      "label": "약왕곡 여성 의상 원본",
+      "textureName": "skeleton_23",
+      "pathId": 150,
+      "size": [
+        3481,
+        691
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_여채미_skeleton_747",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "여채미",
+      "label": "여채미 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 747,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_염라전_skeleton_29_143",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "염라전",
+      "label": "염라전 여성 의상 원본",
+      "textureName": "skeleton_29",
+      "pathId": 143,
+      "size": [
+        1628,
+        1032
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_오독교_skeleton_13_103",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "오독교",
+      "label": "오독교 여성 의상 원본",
+      "textureName": "skeleton_13",
+      "pathId": 103,
+      "size": [
+        1045,
+        1558
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_용봉아_skeleton_816",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "용봉아",
+      "label": "용봉아 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 816,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_용응상_skeleton_1105",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "용응상",
+      "label": "용응상 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1105,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_임운상_skeleton_764",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "임운상",
+      "label": "임운상 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 764,
+      "size": [
+        1024,
+        512
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_장락방_skeleton_28_141",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "장락방",
+      "label": "장락방 여성 의상 원본",
+      "textureName": "skeleton_28",
+      "pathId": 141,
+      "size": [
+        3624,
+        611
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_장문형_skeleton_1190",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "장문형",
+      "label": "장문형 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1190,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_주검산장_skeleton_27_104",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "주검산장",
+      "label": "주검산장 여성 의상 원본",
+      "textureName": "skeleton_27",
+      "pathId": 104,
+      "size": [
+        3798,
+        556
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_천산파_skeleton_17_156",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "천산파",
+      "label": "천산파 여성 의상 원본",
+      "textureName": "skeleton_17",
+      "pathId": 156,
+      "size": [
+        940,
+        2061
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": "resources/previews/female/skeleton_17_preview.png"
+    },
+    {
+      "id": "female_outfit_철장방_사도복_skeleton_3_98",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "철장방/사도복",
+      "label": "철장방/사도복 여성 의상 원본",
+      "textureName": "skeleton_3",
+      "pathId": 98,
+      "size": [
+        3689,
+        379
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_청성파_유생복_skeleton_8_99",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "청성파/유생복",
+      "label": "청성파/유생복 여성 의상 원본",
+      "textureName": "skeleton_8",
+      "pathId": 99,
+      "size": [
+        838,
+        2094
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_취의문_유협복_skeleton_9_105",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "취의문/유협복",
+      "label": "취의문/유협복 여성 의상 원본",
+      "textureName": "skeleton_9",
+      "pathId": 105,
+      "size": [
+        1663,
+        1084
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_팔괘문_관복_skeleton_7_112",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "팔괘문/관복",
+      "label": "팔괘문/관복 여성 의상 원본",
+      "textureName": "skeleton_7",
+      "pathId": 112,
+      "size": [
+        3906,
+        396
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_패도문_skeleton_31_155",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "패도문",
+      "label": "패도문 여성 의상 원본",
+      "textureName": "skeleton_31",
+      "pathId": 155,
+      "size": [
+        933,
+        2185
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_평상복_skeleton_25_154",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "평상복",
+      "label": "평상복 여성 의상 원본",
+      "textureName": "skeleton_25",
+      "pathId": 154,
+      "size": [
+        2781,
+        558
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_풍기청평_skeleton_2_94",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "풍기청평",
+      "label": "풍기청평 여성 의상 원본",
+      "textureName": "skeleton_2",
+      "pathId": 94,
+      "size": [
+        3738,
+        416
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_해사방_살수복_skeleton_11_133",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "해사방/살수복",
+      "label": "해사방/살수복 여성 의상 원본",
+      "textureName": "skeleton_11",
+      "pathId": 133,
+      "size": [
+        1579,
+        1065
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_황보청삼_skeleton_745",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "황보청삼",
+      "label": "황보청삼 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 745,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_황하방_강도복_skeleton_10_128",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "황하방/강도복",
+      "label": "황하방/강도복 여성 의상 원본",
+      "textureName": "skeleton_10",
+      "pathId": 128,
+      "size": [
+        2765,
+        532
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 167,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "female_outfit_희청범_skeleton_1096",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "희청범",
+      "label": "희청범 여성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1096,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_개방_skeleton_12_158",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "개방",
+      "label": "개방 남성 의상 원본",
+      "textureName": "skeleton_12",
+      "pathId": 158,
+      "size": [
+        1821,
+        1316
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_거경방_작업복_skeleton_6_129",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "거경방/작업복",
+      "label": "거경방/작업복 남성 의상 원본",
+      "textureName": "skeleton_6",
+      "pathId": 129,
+      "size": [
+        4064,
+        411
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_계심광_skeleton_903",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "계심광",
+      "label": "계심광 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 903,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_고회_skeleton_1069",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "고회",
+      "label": "고회 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1069,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_공동파_skeleton_20_85",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "공동파",
+      "label": "공동파 남성 의상 원본",
+      "textureName": "skeleton_20",
+      "pathId": 85,
+      "size": [
+        3873,
+        785
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_금강밀종_skeleton_27_146",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "금강밀종",
+      "label": "금강밀종 남성 의상 원본",
+      "textureName": "skeleton_27",
+      "pathId": 146,
+      "size": [
+        1202,
+        2079
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_금룡방_상인복_skeleton_5_149",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "금룡방/상인복",
+      "label": "금룡방/상인복 남성 의상 원본",
+      "textureName": "skeleton_5",
+      "pathId": 149,
+      "size": [
+        4053,
+        840
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_금룡생_skeleton_1037",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "금룡생",
+      "label": "금룡생 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1037,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_기타_skeleton_14_159",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "기타",
+      "label": "기타 남성 의상 원본",
+      "textureName": "skeleton_14",
+      "pathId": 159,
+      "size": [
+        1317,
+        2059
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_기타_skeleton_31_130",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "기타",
+      "label": "기타 남성 의상 원본",
+      "textureName": "skeleton_31",
+      "pathId": 130,
+      "size": [
+        4065,
+        2374
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_나쁜애_skeleton_788",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "나쁜애",
+      "label": "나쁜애 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 788,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_당문_skeleton_15_144",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "당문",
+      "label": "당문 남성 의상 원본",
+      "textureName": "skeleton_15",
+      "pathId": 144,
+      "size": [
+        2495,
+        1094
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_대은각_skeleton_16_86",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "대은각",
+      "label": "대은각 남성 의상 원본",
+      "textureName": "skeleton_16",
+      "pathId": 86,
+      "size": [
+        3407,
+        908
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_도무명_skeleton_1261",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "도무명",
+      "label": "도무명 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1261,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_모산파_skeleton_23_160",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "모산파",
+      "label": "모산파 남성 의상 원본",
+      "textureName": "skeleton_23",
+      "pathId": 160,
+      "size": [
+        3551,
+        910
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_무당파_skeleton_21_88",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "무당파",
+      "label": "무당파 남성 의상 원본",
+      "textureName": "skeleton_21",
+      "pathId": 88,
+      "size": [
+        4023,
+        767
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_무절의_skeleton_909",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "무절의",
+      "label": "무절의 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 909,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_백마홍장_skeleton_157",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "백마홍장",
+      "label": "백마홍장 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 157,
+      "size": [
+        2102,
+        1121
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_벽력당_skeleton_33_82",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "벽력당",
+      "label": "벽력당 남성 의상 원본",
+      "textureName": "skeleton_33",
+      "pathId": 82,
+      "size": [
+        4096,
+        1024
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_복우파_농민복_skeleton_4_131",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "복우파/농민복",
+      "label": "복우파/농민복 남성 의상 원본",
+      "textureName": "skeleton_4",
+      "pathId": 131,
+      "size": [
+        3960,
+        427
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_봉래파_skeleton_25_114",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "봉래파",
+      "label": "봉래파 남성 의상 원본",
+      "textureName": "skeleton_25",
+      "pathId": 114,
+      "size": [
+        4030,
+        832
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_비룡문_skeleton_34_117",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "비룡문",
+      "label": "비룡문 남성 의상 원본",
+      "textureName": "skeleton_34",
+      "pathId": 117,
+      "size": [
+        1024,
+        2048
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_소림사_skeleton_18_153",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "소림사",
+      "label": "소림사 남성 의상 원본",
+      "textureName": "skeleton_18",
+      "pathId": 153,
+      "size": [
+        2257,
+        1154
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_신기문_skeleton_22_147",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "신기문",
+      "label": "신기문 남성 의상 원본",
+      "textureName": "skeleton_22",
+      "pathId": 147,
+      "size": [
+        2192,
+        1120
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_아미파_skeleton_19_136",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "아미파",
+      "label": "아미파 남성 의상 원본",
+      "textureName": "skeleton_19",
+      "pathId": 136,
+      "size": [
+        3539,
+        784
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_약왕곡_skeleton_24_124",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "약왕곡",
+      "label": "약왕곡 남성 의상 원본",
+      "textureName": "skeleton_24",
+      "pathId": 124,
+      "size": [
+        1792,
+        2090
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_염라왕_skeleton_1028",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "염라왕",
+      "label": "염라왕 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1028,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_염라전_skeleton_30_87",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "염라전",
+      "label": "염라전 남성 의상 원본",
+      "textureName": "skeleton_30",
+      "pathId": 87,
+      "size": [
+        3948,
+        615
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_오독교_skeleton_13_101",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "오독교",
+      "label": "오독교 남성 의상 원본",
+      "textureName": "skeleton_13",
+      "pathId": 101,
+      "size": [
+        3777,
+        618
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_위서화_skeleton_1231",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "위서화",
+      "label": "위서화 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1231,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_이름_skeleton_1139",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "이름",
+      "label": "이름 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1139,
+      "size": [
+        1024,
+        512
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_장락방_skeleton_29_93",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "장락방",
+      "label": "장락방 남성 의상 원본",
+      "textureName": "skeleton_29",
+      "pathId": 93,
+      "size": [
+        2951,
+        1075
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_주검산장_skeleton_28_109",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "주검산장",
+      "label": "주검산장 남성 의상 원본",
+      "textureName": "skeleton_28",
+      "pathId": 109,
+      "size": [
+        2235,
+        1107
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_천산파_skeleton_17_84",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "천산파",
+      "label": "천산파 남성 의상 원본",
+      "textureName": "skeleton_17",
+      "pathId": 84,
+      "size": [
+        1282,
+        2165
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": "resources/previews/male/skeleton_17_preview.png"
+    },
+    {
+      "id": "male_outfit_철장방_사도복_skeleton_3_118",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "철장방/사도복",
+      "label": "철장방/사도복 남성 의상 원본",
+      "textureName": "skeleton_3",
+      "pathId": 118,
+      "size": [
+        3477,
+        922
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_청성파_유생복_skeleton_8_115",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "청성파/유생복",
+      "label": "청성파/유생복 남성 의상 원본",
+      "textureName": "skeleton_8",
+      "pathId": 115,
+      "size": [
+        2366,
+        1066
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_취의문_유협복_skeleton_9_162",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "취의문/유협복",
+      "label": "취의문/유협복 남성 의상 원본",
+      "textureName": "skeleton_9",
+      "pathId": 162,
+      "size": [
+        2557,
+        1178
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_팔괘문_관복_skeleton_7_108",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "팔괘문/관복",
+      "label": "팔괘문/관복 남성 의상 원본",
+      "textureName": "skeleton_7",
+      "pathId": 108,
+      "size": [
+        1052,
+        2248
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_패도문_skeleton_32_81",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "패도문",
+      "label": "패도문 남성 의상 원본",
+      "textureName": "skeleton_32",
+      "pathId": 81,
+      "size": [
+        4058,
+        816
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_평상복_skeleton_26_152",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "평상복",
+      "label": "평상복 남성 의상 원본",
+      "textureName": "skeleton_26",
+      "pathId": 152,
+      "size": [
+        3754,
+        629
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_풍기청평_skeleton_2_100",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "풍기청평",
+      "label": "풍기청평 남성 의상 원본",
+      "textureName": "skeleton_2",
+      "pathId": 100,
+      "size": [
+        2390,
+        1230
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_해사방_살수복_skeleton_11_126",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "해사방/살수복",
+      "label": "해사방/살수복 남성 의상 원본",
+      "textureName": "skeleton_11",
+      "pathId": 126,
+      "size": [
+        3289,
+        610
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_황보빈_skeleton_1368",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "황보빈",
+      "label": "황보빈 남성 의상 원본",
+      "textureName": "skeleton",
+      "pathId": 1368,
+      "size": [
+        1024,
+        1024
+      ],
+      "atlasName": null,
+      "atlasPathId": -1,
+      "format": "RGBA32",
+      "preview": ""
+    },
+    {
+      "id": "male_outfit_황하방_강도복_skeleton_10_125",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "황하방/강도복",
+      "label": "황하방/강도복 남성 의상 원본",
+      "textureName": "skeleton_10",
+      "pathId": 125,
+      "size": [
+        1934,
+        1110
+      ],
+      "atlasName": "skeleton.atlas",
+      "atlasPathId": 170,
+      "format": "RGBA32",
+      "preview": ""
+    }
+  ]
+}

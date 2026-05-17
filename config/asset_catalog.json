@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "id": "female_clothing_skeleton_17_0",
+      "gender": "female",
+      "type": "outfit",
+      "label": "천산파 여성 의상 원본",
+      "textureName": "skeleton_17",
+      "pathId": 167,
+      "preview": "resources/previews/female/skeleton_17_preview.png"
+    },
+    {
+      "id": "male_clothing_skeleton_17_0",
+      "gender": "male",
+      "type": "outfit",
+      "label": "천산파 남성 의상 원본",
+      "textureName": "skeleton_17",
+      "pathId": 157,
+      "preview": "resources/previews/male/skeleton_17_preview.png"
+    }
+  ]
+}

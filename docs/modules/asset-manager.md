@@ -14,11 +14,19 @@ src/preload/preload.ts
 config/asset_config.json
 config/asset_catalog.json
 config/current_fonts.json
+config/current_asset_packs.json
 resources/tools/AssetManager/
 storage/backups/
 storage/asset_packs/
 storage/fonts/
 ```
+
+## 배포 / ASAR 주의
+
+- ASAR release build에서도 `AssetManager_UnityPy.exe`와 Python runtime 파일은 `extraResources`로 복사된 `resources/tools/AssetManager` 아래의 실제 파일 경로에 있어야 합니다.
+- `AssetManager_UnityPy.exe`는 ASAR 내부 파일을 실행하거나 직접 읽는 구조가 아니므로, `metadata`, `originals`, bundled dependency `.dll`/`.pyd` 파일을 `app.asar`에 넣지 않습니다.
+- plan/report 작업 파일은 패키징된 앱에서 `app.getPath('userData')/storage/asset-manager-work/{plans,reports}`에 생성합니다. repo의 `resources/tools/AssetManager/work`와 `reports`는 release bundle에 포함하지 않습니다.
+- release 검증은 `scripts/verify-release.mjs`에서 `AssetManager_UnityPy.exe`, `metadata/ui_textures.tsv`, FFmpeg/frei0r 파일 존재와 ASAR 제외 경로를 확인합니다.
 
 ## 백업
 
@@ -43,9 +51,18 @@ storage/fonts/
 
 - `config/asset_catalog.json`을 UI 카탈로그로 사용합니다.
 - Asset Pack ZIP import, pack target 선택, 직접 PNG 선택을 지원합니다.
+- 어셋팩 추가 Dialog는 Mod Manager와 같은 온라인/로컬 탭 구조를 사용한다.
+- 온라인 어셋팩 catalog 위치는 `asset-packs/index.json`이며, ZIP은 `asset-packs/packages/{packId}/{version}/{packId}.zip` 경로를 사용한다.
+- 온라인 catalog item은 `id`, `name`, `author`, `description`, `version`, `downloadPath`, `thumbnailPath`, `sha256`, `gameIds`를 지원한다.
+- 온라인에서 설치한 어셋팩은 `pack.json`에 `version`과 `source: { type: "github", catalogId, downloadPath }`를 보존해서 설치/업데이트 상태를 비교한다.
 - 단일 적용은 선택한 catalog item과 replacement PNG 1개를 `asset:run-clothes-patch`로 전달합니다.
 - 팩 전체 적용은 선택한 pack의 모든 target을 `mode: "pack_all"`로 전달합니다.
 - 팩 전체 적용 완료 시 `NotificationContext`로 완료 알림을 표시합니다.
+- pack target 적용 성공 후 `config/current_asset_packs.json`에 catalogId별 현재 적용 pack/target/preview 상태를 기록한다.
+- 원본 미리보기 영역은 해당 catalogId에 현재 적용 pack 기록이 있으면 원본 preview 대신 현재 적용 pack preview를 보여준다. caption은 `현재 적용됨: {packName} · {targetLabel}` 형식이다.
+- 미리보기 이미지는 클릭하면 확대 Dialog로 열린다.
+- 어셋을 포함해 `복원하기`를 실행하면 `config/current_asset_packs.json` 기록을 자동으로 비운다.
+- 게임 업데이트나 외부 도구로 원본 파일이 복원된 경우를 위해 텍스처 교체 작업에는 `적용 기록 초기화` 버튼을 제공한다.
 
 ## 폰트 교체 작업
 
@@ -186,6 +203,48 @@ AssetManager.tsx
 -> Renderer 폰트 테이블 다시 로드
 ```
 
+## Asset Catalog v2 / Developer Editor
+
+- `config/asset_catalog.json`은 의상뿐 아니라 UI Texture2D 대상도 담는 범용 catalog로 확장한다.
+- `config/asset_catalog.json`은 앱 표시, 원본 대상 선택, pack target 연결을 위한 Electron-side catalog이다. UnityPy가 실제 패치 가능 여부를 판단하는 source of truth는 아니다.
+- v2 catalog는 기존 `gender` 필드를 legacy alias로 유지하되, 신규 작성/편집은 `option1`을 우선 사용한다.
+- UI 라벨에서는 `gender` 대신 `대상 구분`으로 표시한다. 예: `category=UI`, `option1=title`, `option1Label=타이틀`, `displayLabel=UI 타이틀`.
+- patch payload는 Python/UnityPy 계약을 유지한다. Electron은 `category`, `option1`, `option2`, `textureName`, `pathId`, `size`, `pngPath`를 plan으로 변환한다.
+- 실제 패치 metadata는 category별로 분리한다. 현재 라우팅은 `category=UI`만 `ui_texture` plan과 `metadata/ui_textures.tsv`를 사용하고, 그 외 기존 texture target은 `texture` plan과 `metadata/data.tsv`를 사용한다.
+- `category=UI` target은 UnityPy `ui_texture` plan으로 라우팅한다. 이 API는 `path_id`와 `png_file`을 중심으로 `metadata/ui_textures.tsv`에서 실제 `assets_file`, size, format, flip_y를 찾는다.
+- UI Texture plan은 `game_id`, `data_dir`, `dry_run`, `stop_on_error`, `ui_texture_metadata_path`, `originals_dir`, `jobs[].path_id`, `jobs[].png_file` 구조를 사용한다.
+- UI Texture 대상은 현재 DXT5 PNG 교체만 지원하며, PNG 크기는 `ui_textures.tsv`의 `width`/`height`와 정확히 같아야 한다.
+- pack 전체 적용에 의상 target과 UI target이 섞이면 Electron은 기존 `texture` plan과 신규 `ui_texture` plan으로 나누어 순차 실행한다.
+- `Ctrl+Alt+C`는 공용 developer shortcut이다. `DeveloperGateDialog` 비밀번호 확인 후 Asset Manager의 Catalog Editor를 연다.
+- 비밀번호 확인 후 열리는 개발자 전용 도구에는 Catalog Editor와 어셋팩 배포용 파일 생성 도구가 있다.
+- developer password는 OS 환경변수 `HEXX_FORGE_DEVELOPER_PASSWORD` 또는 `config/developer_access.json`에서 명시적으로 관리한다. 둘 다 없으면 Catalog Editor 접근은 차단되며 파일을 자동 생성하지 않는다.
+- Catalog Editor에서 원본 미리보기 PNG를 선택하면 `config/resources/previews/<category>/<id>_preview.png`로 복사하고 item의 `preview` 값을 갱신한다.
+- 어셋팩 배포 도구는 PNG 여러 개를 선택하고 각 PNG마다 catalog target을 지정해 `pack.json`과 배포 ZIP을 생성할 수 있다. 완성된 ZIP을 직접 선택하는 legacy 경로도 유지한다.
+- PNG 기반 배포 생성 시 각 row의 `catalogId`, `category`, `option1`, `option2`, `displayLabel`, `textureName`, `pathId`, `size`, `png`, `preview`를 pack target으로 기록한다. `category=UI` target은 `option2` 없이 생성할 수 있다.
+- 생성된 ZIP은 `asset-packs/packages/{packId}/{version}/{packId}.zip`으로 저장하고, 각 target preview는 pack 내부 `previews/<category>/..._preview.png`에 최대 `420x280` 크기로 저장한다.
+- 선택한 대표 미리보기 PNG 또는 첫 번째 target PNG는 최대 `420x280` 크기의 catalog thumbnail로 줄여 `asset-packs/thumbnails/{packId}.png`에 저장한다.
+- 어셋팩 배포 도구는 `asset-packs/index.json`을 생성/갱신하고 ZIP의 `sha256`을 catalog item에 기록한다. 생성된 `asset-packs` 하위 파일은 개발자가 확인 후 커밋한다.
+- 배포 ZIP 생성 후에는 같은 ZIP을 로컬 `storage/asset_packs`에도 import해서 Asset Manager의 `팩 선택` 드롭다운에서 즉시 테스트할 수 있게 한다.
+- 실제 적용 성공 여부는 의상은 `resources/tools/AssetManager/metadata/data.tsv`, UI Texture는 `resources/tools/AssetManager/metadata/ui_textures.tsv`와 UnityPy 검증에 의존한다.
+
+## UnityPy Metadata Catalog Policy
+
+`asset_catalog.json`과 `resources/tools/AssetManager/metadata/*.tsv`는 역할이 다르다.
+
+| 파일 | 소유 계층 | 역할 | 현재 사용처 |
+| --- | --- | --- | --- |
+| `config/asset_catalog.json` | Electron/Renderer | 앱에서 보여줄 원본 대상 catalog와 pack target 작성 기준 | 원본 대상 선택, Catalog Editor, pack 배포 UI |
+| `resources/tools/AssetManager/metadata/data.tsv` | UnityPy patcher | 기존 의상/texture target의 실제 patch metadata | `kind: "texture"` plan |
+| `resources/tools/AssetManager/metadata/ui_textures.tsv` | UnityPy patcher | UI Texture2D target의 실제 patch metadata | `kind: "ui_texture"` plan |
+| `resources/tools/AssetManager/metadata/fonts_data.tsv` | UnityPy patcher | font target metadata | font extract/patch/restore |
+
+- `ui_textures.tsv`는 “UI가 아닌 모든 새 asset”을 담기 위한 catch-all 파일이 아니다. 이름 그대로 UI Texture2D patch API용 metadata이다.
+- UI가 아닌 신규 asset category가 생기면, 먼저 UnityPy plan kind와 metadata TSV 이름/columns를 정하고, 이 문서의 표와 `assetPatcherService.ts` routing을 함께 갱신한다.
+- 새 metadata 파일을 추가할 때는 `asset_catalog.json`의 `category` 값, pack target 작성 규칙, UnityPy metadata row, 배포 리소스 포함 여부를 한 세트로 관리한다.
+- Catalog Editor는 `asset_catalog.json`만 저장한다. `data.tsv`, `ui_textures.tsv` 같은 UnityPy metadata 파일을 자동 수정하지 않는다.
+- Catalog Editor row는 입력 중 `id`가 바뀌어도 focus가 튀지 않도록 별도 `rowId`를 React key로 사용한다.
+- Catalog Editor는 원본 preview 관리만 담당한다. 변경 PNG 선택은 pack 배포 도구 또는 직접 이미지 적용 흐름에서 처리한다.
+
 ## TODO
 
 - [x] 백업 확인창 추가
@@ -218,5 +277,5 @@ AssetManager.tsx
 - [ ] report 상세 UI
 - [ ] 현재폰트 표시명 상세 정보 보강
 - [ ] 원본 백업 존재 여부를 catalog item별로 표시
-- [ ] `asset_catalog.json` v2 마이그레이션 완료
+- [x] `asset_catalog.json` v2 마이그레이션 완료
 - [ ] pack.json v2 검증 강화

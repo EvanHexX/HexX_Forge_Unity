@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "gameId": "LongYinLiZhiZhuan",
+  "updatedAt": "2026-05-07T04:28:01.785Z",
+  "fonts": [
+    {
+      "pathId": 2418,
+      "targetLabel": "2418",
+      "metadataName": "SourceHanSerifCN-Medium",
+      "currentFont": "SourceHanSerifCN-Medium.otf",
+      "currentFontFileName": "SourceHanSerifCN-Medium.otf"
+    },
+    {
+      "pathId": 2419,
+      "targetLabel": "2419",
+      "metadataName": "汇文明朝体",
+      "currentFont": "汇文明朝体.ttf",
+      "currentFontFileName": "汇文明朝体.ttf"
+    },
+    {
+      "pathId": 2420,
+      "targetLabel": "2420",
+      "metadataName": "SourceHanSansCN-Regular",
+      "currentFont": "SourceHanSansCN-Regular.otf",
+      "currentFontFileName": "SourceHanSansCN-Regular.otf"
+    },
+    {
+      "pathId": 2421,
+      "targetLabel": "2421",
+      "metadataName": "SourceHanSansCN-Bold",
+      "currentFont": "SourceHanSansCN-Bold.otf",
+      "currentFontFileName": "SourceHanSansCN-Bold.otf"
+    },
+    {
+      "pathId": 2422,
+      "targetLabel": "2422",
+      "metadataName": "SourceHanSerifCN-Bold",
+      "currentFont": "SourceHanSerifCN-Bold.otf",
+      "currentFontFileName": "SourceHanSerifCN-Bold.otf"
+    },
+    {
+      "pathId": 2423,
+      "targetLabel": "2423",
+      "metadataName": "Roboto-Bold",
+      "currentFont": "Roboto-Bold.ttf",
+      "currentFontFileName": "Roboto-Bold.ttf"
+    },
+    {
+      "pathId": 2424,
+      "targetLabel": "2424",
+      "metadataName": "字体家AI造字霸行",
+      "currentFont": "字体家AI造字霸行.ttf",
+      "currentFontFileName": "字体家AI造字霸行.ttf"
+    },
+    {
+      "pathId": 2425,
+      "targetLabel": "2425",
+      "metadataName": "Bangers",
+      "currentFont": "Bangers.ttf",
+      "currentFontFileName": "Bangers.ttf"
+    },
+    {
+      "pathId": 2426,
+      "targetLabel": "2426",
+      "metadataName": "Electronic Highway Sign",
+      "currentFont": "Electronic Highway Sign.ttf",
+      "currentFontFileName": "Electronic Highway Sign.ttf"
+    },
+    {
+      "pathId": 2427,
+      "targetLabel": "2427",
+      "metadataName": "Anton",
+      "currentFont": "Anton.ttf",
+      "currentFontFileName": "Anton.ttf"
+    },
+    {
+      "pathId": 2428,
+      "targetLabel": "2428",
+      "metadataName": "字体家AI造字剑客",
+      "currentFont": "字体家AI造字剑客.ttf",
+      "currentFontFileName": "字体家AI造字剑客.ttf"
+    },
+    {
+      "pathId": 2429,
+      "targetLabel": "2429",
+      "metadataName": "Oswald-Bold",
+      "currentFont": "Oswald-Bold.ttf",
+      "currentFontFileName": "Oswald-Bold.ttf"
+    },
+    {
+      "pathId": 2430,
+      "targetLabel": "2430",
+      "metadataName": "LiberationSans",
+      "currentFont": "LiberationSans.ttf",
+      "currentFontFileName": "LiberationSans.ttf"
+    }
+  ]
+}

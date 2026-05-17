@@ -1,0 +1,3 @@
+category	group	display_name	texture_name	pathID	width	height	format	assets_file	flip_y
+UI	title	제목	sactx-0-2048x2048-DXT5-TitleUIAtlas-192071c7	611	2048	2048	DXT5	resources.assets	true
+UI	background	메인배경	登录界面	111	1920	1080	DXT5	sharedassets1.assets	true

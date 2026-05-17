@@ -1,0 +1,58 @@
+{
+  "game_id": "LongYinLiZhiZhuan",
+  "preview_font_dir": null,
+  "fonts": [
+    {
+      "path_id": 2418,
+      "font_file_name": "SourceHanSerifCN-Medium.otf"
+    },
+    {
+      "path_id": 2419,
+      "font_file_name": "汇文明朝体.otf"
+    },
+    {
+      "path_id": 2420,
+      "font_file_name": "SourceHanSansCN-Regular.otf"
+    },
+    {
+      "path_id": 2421,
+      "font_file_name": "SourceHanSansCN-Bold.otf"
+    },
+    {
+      "path_id": 2422,
+      "font_file_name": "SourceHanSerifCN-Bold.otf"
+    },
+    {
+      "path_id": 2423,
+      "font_file_name": "Roboto-Bold.otf"
+    },
+    {
+      "path_id": 2424,
+      "font_file_name": "字体家AI造字霸行.otf"
+    },
+    {
+      "path_id": 2425,
+      "font_file_name": "Bangers.otf"
+    },
+    {
+      "path_id": 2426,
+      "font_file_name": "Electronic_Highway_Sign.otf"
+    },
+    {
+      "path_id": 2427,
+      "font_file_name": "Anton.otf"
+    },
+    {
+      "path_id": 2428,
+      "font_file_name": "字体家AI造字剑客.otf"
+    },
+    {
+      "path_id": 2429,
+      "font_file_name": "Oswald-Bold.otf"
+    },
+    {
+      "path_id": 2430,
+      "font_file_name": "LiberationSans.otf"
+    }
+  ]
+}

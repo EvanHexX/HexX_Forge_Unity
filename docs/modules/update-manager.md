@@ -25,7 +25,9 @@ For a local package without upload, run `npm.cmd run dist`.
 
 - Windows uses the NSIS target and supports the primary auto-update path.
 - Windows keeps normal user-level execution. See `docs/modules/build-policy.md` for the `requestedExecutionLevel` decision.
-- The first beta disables ASAR packaging because `electron-builder@26` failed while injecting Windows ASAR integrity metadata in local packaging. Re-enable ASAR after that builder/Electron path is validated.
+- `package.json` enables ASAR for app code. Runtime resources that must remain executable or readable by external programs stay in `extraResources` under `release/win-unpacked/resources/{config,docs,resources,storage}`.
+- `resources/tools/AssetManager`, `resources/tools/ffmpeg`, and `resources/tools/frei0r` must remain outside `app.asar`; external `.exe`/`.dll` files should never depend on ASAR virtual paths.
+- If `electron-builder` ASAR integrity injection fails on Windows, treat it as a release blocker and either fix the builder/Electron path or explicitly document a temporary ASAR rollback before publishing.
 - macOS builds emit `dmg` and `zip` artifacts. Real macOS auto-update validation requires Developer ID signing and notarization before release testing.
 - Public GitHub releases do not require end-user GitHub tokens.
 
@@ -33,6 +35,7 @@ For a local package without upload, run `npm.cmd run dist`.
 
 - `npm.cmd run build` completes successfully.
 - `npm.cmd run dist` creates Windows release artifacts and updater metadata.
+- `release/win-unpacked/resources/app.asar` exists.
 - `release/win-unpacked/resources/resources/tools/AssetManager/AssetManager_UnityPy.exe` exists.
 - `release/win-unpacked/resources/resources/tools/ffmpeg/ffmpeg.exe` exists.
 - `release/win-unpacked/resources/resources/tools/ffmpeg/ffprobe.exe` exists.
@@ -40,8 +43,10 @@ For a local package without upload, run `npm.cmd run dist`.
 - `release/win-unpacked/resources/resources/tools/frei0r/filter/keyspillm0pup.dll` exists.
 - `release/win-unpacked/resources/resources/tools/frei0r/filter/alpha0ps_alpha0ps.dll` exists.
 - `release/win-unpacked/resources/resources/tools/frei0r/filter/saturat0r.dll` exists.
+- `release/win-unpacked/resources/resources/tools/AssetManager/metadata/ui_textures.tsv` exists.
 - Packaged FFmpeg can load frei0r plugins from the packaged resource path. At minimum, run a short `frei0r=select0r` dry-run against `release/win-unpacked/resources/resources/tools/frei0r/filter` before publishing.
 - `release/win-unpacked/resources/resources/tools/AssetManager/work` and `reports` are not bundled.
+- `app.asar` does not contain `resources/tools`, local `config/app_settings*`, or bundled writable `storage`.
 - A lower installed version can check a newer GitHub Release, download it, and restart into the new version.
 - Development mode keeps the update UI stable and reports that updates are available only in packaged builds.
 

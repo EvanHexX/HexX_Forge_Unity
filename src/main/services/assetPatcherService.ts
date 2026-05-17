@@ -79,6 +79,22 @@ type TexturePatchPlan = {
     jobs: TexturePatchJob[];
 };
 
+type UiTexturePatchJob = {
+    path_id: number;
+    png_file: string;
+};
+
+type UiTexturePatchPlan = {
+    kind: 'ui_texture';
+    game_id: string;
+    data_dir: string;
+    dry_run: boolean;
+    stop_on_error: boolean;
+    ui_texture_metadata_path: string;
+    originals_dir: string;
+    jobs: UiTexturePatchJob[];
+};
+
 type FontJobParam = {
     pathId?: number;
     path_id?: number;
@@ -252,6 +268,10 @@ function getSharedAssetsFile(gamePath: string): string {
     return path.join(gamePath, 'LongYinLiZhiZhuan_Data', 'sharedassets1.assets');
 }
 
+function getGameDataDir(gamePath: string): string {
+    return path.join(gamePath, 'LongYinLiZhiZhuan_Data');
+}
+
 function getResourcesAssetsFile(gamePath: string): string {
     return path.join(gamePath, 'LongYinLiZhiZhuan_Data', 'resources.assets');
 }
@@ -351,6 +371,30 @@ function buildPlan(params: RunTexturePatchParams, assetsFile: string, paths: Pat
         stop_on_error: params.stopOnError ?? params.stop_on_error ?? true,
         texture_metadata_path: path.join(paths.metadataDir, 'data.tsv'),
         jobs: targets.map((target) => buildJob(target, gameId, assetsFile, paths))
+    };
+}
+
+function isUiTextureTarget(target: TexturePatchTargetParam): boolean {
+    return String(target.category || '').trim().toLowerCase() === 'ui';
+}
+
+function buildUiTextureJob(target: TexturePatchTargetParam): UiTexturePatchJob {
+    return {
+        path_id: requireNumber(target.pathID ?? target.pathId, 'path_id'),
+        png_file: requireString(target.pngFile || target.pngPath, 'png_file')
+    };
+}
+
+function buildUiTexturePlan(params: RunTexturePatchParams, dataDir: string, paths: PatcherPaths, targets: TexturePatchTargetParam[]): UiTexturePatchPlan {
+    return {
+        kind: 'ui_texture',
+        game_id: params.gameId || 'LongYinLiZhiZhuan',
+        data_dir: dataDir,
+        dry_run: params.dryRun ?? params.dry_run ?? false,
+        stop_on_error: params.stopOnError ?? params.stop_on_error ?? true,
+        ui_texture_metadata_path: path.join(paths.metadataDir, 'ui_textures.tsv'),
+        originals_dir: paths.originalsDir,
+        jobs: targets.map(buildUiTextureJob)
     };
 }
 
@@ -478,42 +522,112 @@ export async function runClothesPatch(params: RunTexturePatchParams) {
         throw new Error('게임 경로가 설정되지 않았습니다.');
     }
 
-    const assetsFile = getSharedAssetsFile(gamePath);
+    const targets = normalizeTargets(params);
+    const uiTargets = targets.filter(isUiTextureTarget);
+    const textureTargets = targets.filter((target) => !isUiTextureTarget(target));
+    const runResults: Array<{
+        kind: 'texture' | 'ui_texture';
+        planPath: string;
+        reportPath: string;
+        stdout: string;
+        stderr: string;
+        report: unknown;
+    }> = [];
 
-    if (!fs.existsSync(assetsFile)) {
-        throw new Error(`sharedassets1.assets 파일을 찾지 못했습니다: ${assetsFile}`);
+    if (textureTargets.length > 0) {
+        const assetsFile = getSharedAssetsFile(gamePath);
+
+        if (!fs.existsSync(assetsFile)) {
+            throw new Error(`sharedassets1.assets 파일을 찾지 못했습니다: ${assetsFile}`);
+        }
+
+        const plan = buildPlan({ ...params, targets: textureTargets }, assetsFile, paths);
+        const name = `texture_patch_${timestamp()}`;
+        const planPath = path.join(paths.plansDir, `${name}.json`);
+        const reportPath = path.join(paths.reportsDir, `${name}.report.json`);
+
+        fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf-8');
+
+        const processResult = await executePatcher(paths, planPath, reportPath);
+        const reportExists = fs.existsSync(reportPath);
+        const report = reportExists
+            ? JSON.parse(fs.readFileSync(reportPath, 'utf-8'))
+            : null;
+
+        if (processResult.exitCode !== 0 || !report || report.status !== 'success') {
+            throw new Error([
+                'AssetManager_UnityPy 실행 실패',
+                'kind=texture',
+                `exitCode=${processResult.exitCode}`,
+                report ? `report.status=${report.status}` : 'report 없음',
+                processResult.stderr.trim() ? `stderr=${processResult.stderr.trim()}` : ''
+            ].filter(Boolean).join('\n'));
+        }
+
+        runResults.push({
+            kind: 'texture',
+            planPath,
+            reportPath,
+            stdout: processResult.stdout,
+            stderr: processResult.stderr,
+            report
+        });
     }
 
-    const plan = buildPlan(params, assetsFile, paths);
-    const name = `texture_patch_${timestamp()}`;
-    const planPath = path.join(paths.plansDir, `${name}.json`);
-    const reportPath = path.join(paths.reportsDir, `${name}.report.json`);
+    if (uiTargets.length > 0) {
+        const dataDir = getGameDataDir(gamePath);
+        const metadataPath = path.join(paths.metadataDir, 'ui_textures.tsv');
 
-    fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf-8');
+        if (!fs.existsSync(dataDir)) {
+            throw new Error(`게임 Data 폴더를 찾지 못했습니다: ${dataDir}`);
+        }
 
-    const processResult = await executePatcher(paths, planPath, reportPath);
-    const reportExists = fs.existsSync(reportPath);
-    const report = reportExists
-        ? JSON.parse(fs.readFileSync(reportPath, 'utf-8'))
-        : null;
+        if (!fs.existsSync(metadataPath)) {
+            throw new Error(`UI texture metadata를 찾지 못했습니다: ${metadataPath}`);
+        }
 
-    if (processResult.exitCode !== 0 || !report || report.status !== 'success') {
-        throw new Error([
-            'AssetManager_UnityPy 실행 실패',
-            `exitCode=${processResult.exitCode}`,
-            report ? `report.status=${report.status}` : 'report 없음',
-            processResult.stderr.trim() ? `stderr=${processResult.stderr.trim()}` : ''
-        ].filter(Boolean).join('\n'));
+        const plan = buildUiTexturePlan({ ...params, targets: uiTargets }, dataDir, paths, uiTargets);
+        const name = `ui_texture_patch_${timestamp()}`;
+        const planPath = path.join(paths.plansDir, `${name}.json`);
+        const reportPath = path.join(paths.reportsDir, `${name}.report.json`);
+
+        fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf-8');
+
+        const processResult = await executePatcher(paths, planPath, reportPath);
+        const reportExists = fs.existsSync(reportPath);
+        const report = reportExists
+            ? JSON.parse(fs.readFileSync(reportPath, 'utf-8'))
+            : null;
+
+        if (processResult.exitCode !== 0 || !report || report.status !== 'success') {
+            throw new Error([
+                'AssetManager_UnityPy 실행 실패',
+                'kind=ui_texture',
+                `exitCode=${processResult.exitCode}`,
+                report ? `report.status=${report.status}` : 'report 없음',
+                processResult.stderr.trim() ? `stderr=${processResult.stderr.trim()}` : ''
+            ].filter(Boolean).join('\n'));
+        }
+
+        runResults.push({
+            kind: 'ui_texture',
+            planPath,
+            reportPath,
+            stdout: processResult.stdout,
+            stderr: processResult.stderr,
+            report
+        });
     }
 
     return {
         ok: true,
         mode: params.mode || 'single',
-        planPath,
-        reportPath,
-        stdout: processResult.stdout,
-        stderr: processResult.stderr,
-        report
+        planPath: runResults[0]?.planPath || '',
+        reportPath: runResults[0]?.reportPath || '',
+        stdout: runResults.map((result) => result.stdout).filter(Boolean).join('\n'),
+        stderr: runResults.map((result) => result.stderr).filter(Boolean).join('\n'),
+        report: runResults[0]?.report || null,
+        runs: runResults
     };
 }
 

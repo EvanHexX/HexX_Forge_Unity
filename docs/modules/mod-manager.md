@@ -20,6 +20,29 @@
 - 종속 설치 기준이 있는 file_manager에서 linked JSON을 선택하면, `banana_zero_pack/pack_info.json` 같은 상대 JSON path는 `plugins/ResourceInjector/packs/banana_zero_pack/pack_info.json`처럼 최종 BepInEx 기준 `linkedConfigPath`로 저장한다.
 - DLL 위치 변경은 v1 범위가 아니다. DLL enable/disable은 기존 `plugins/*.dll` 규칙을 유지한다.
 
+## 2026-05-15 Package Export
+
+- Mod Manager 목록의 package row는 배포용 ZIP 내보내기를 지원한다.
+- 내보내기 ZIP은 `모드 추가 > 로컬 > ZIP` flow에서 다시 import 가능한 최상위 `mod-info.json`을 새로 생성한다.
+- `mod-info.json`에는 package metadata의 `name`, `author`, `description`, `packageType`, `version`, `dependency`, `files`를 보존한다.
+- `enabled`, `source` 같은 로컬 설치 상태나 GitHub catalog 추적 metadata는 배포 ZIP에 포함하지 않는다.
+- DLL은 활성 위치 `{gamePath}/BepInEx/{dllPath}` 또는 비활성 위치 `storage/disabled_mods/{dllPath}`에서 읽는다.
+- `config`, `asset`, `script`는 `storage/packages/{packageId}/{file.path}`에서 읽는다. 게임 폴더에서 사용자가 수정한 활성 config를 자동 포함하지 않는다.
+- `folder` 타입은 manifest 목적이므로 ZIP entry를 만들지 않고 `mod-info.json.files[]`에만 기록한다.
+- package metadata가 없는 standalone DLL row도 단일 DLL package ZIP으로 내보낼 수 있다.
+
+## 2026-05-17 Online Mod Developer Tools
+
+- Mod Manager는 Asset Manager와 같은 `DeveloperGateDialog`와 `Ctrl+Alt+C` developer shortcut을 사용한다.
+- 개발자 전용 도구의 온라인 모드 배포 화면은 로컬 repo의 `mods/index.json`과 `mods/packages/{modId}/{version}` 하위 ZIP 파일을 생성, 수정, 삭제한다.
+- Electron 실행 cwd가 repo root가 아닐 수 있으므로 배포 catalog 읽기는 `process.cwd()/mods`와 main bundle 기준 repo root 후보를 함께 확인한다.
+- ZIP을 선택해 저장하면 파일명은 `{modId}.{version}.zip`으로 복사되고, `downloadPath`는 `mods/packages/{modId}/{version}/{modId}.{version}.zip`으로 기록된다.
+- ZIP 선택 시 `sha256`은 자동 계산한다. 기존 항목의 metadata만 수정하는 경우 ZIP을 다시 선택하지 않고 기존 `downloadPath`와 `sha256`을 유지할 수 있다.
+- 기존 항목에는 `다음 버전 준비` 버튼을 제공한다. 버튼은 patch version을 1 올리고 `downloadPath`/`sha256`을 비워 새 ZIP 선택 후 저장하도록 유도한다.
+- 온라인 catalog item은 `readmePath`를 가질 수 있다. 관리자 도구에서 README MD를 선택하면 `mods/readmes/{modId}/{version}/{modId}.{version}.md`로 복사하고 온라인 카드의 `자세히보기`에서 raw markdown text를 표시한다.
+- 삭제는 `mods/index.json` 항목과 `mods/packages/{modId}` 폴더를 함께 제거한다.
+- 이 도구는 GitHub 원격에 직접 push하지 않는다. 생성/수정된 파일은 개발자가 확인 후 commit/push해야 온라인 탭에 반영된다.
+
 ## 🎯 목적
 
 BepInEx 기반 DLL 모드를 관리한다.
@@ -101,7 +124,7 @@ GitHub catalog로 설치된 package는 `version`과 `source`를 저장한다.
       "path": "test.dll",
       "name": "표시 이름",
       "author": "제작자",
-      "type": "dll | asset | mod-info | script | config | folder",
+      "type": "dll | asset | mod-info | script | config | folder | readme",
       "dependsOn": "modpack | <dllPath> | \"\""
     }
   ]
@@ -116,6 +139,7 @@ GitHub catalog로 설치된 package는 `version`과 `source`를 저장한다.
 - `script` — 설정 UI용 configurator JSON
 - `config` — BepInEx/config 내 직접 편집 대상 cfg
 - `folder` — 삭제 시 함께 제거할 폴더 (공통 폴더명 사용 지양)
+- `readme` — 상세정보/온라인 자세히보기에서 표시할 markdown 설명 파일
 
 **dependsOn:**
 
@@ -198,6 +222,7 @@ GitHub catalog로 설치된 package는 `version`과 `source`를 저장한다.
 - ZIP/DLL 다중 등록 또는 전체 DLL 항목 2개 이상인 경우 packageType은 `collection`으로 고정되고 `single`로 되돌릴 수 없다.
 - 파일 추가 (DLL / ZIP)
     - DLL 파일은 `plugins/{fileName}` 경로로 추가하며, 2개 이상이면 자동으로 `collection` 전환
+    - MD 파일은 `readme` 타입으로 추가하며, 설치된 모드 상세정보의 자세한 설명에 표시한다.
     - ZIP 파일은 `inspectZip`으로 내부 파일/폴더 전체 목록을 읽고 패킹 목록 테이블로 표시
     - ZIP에 mod-info가 없어도 패킹용 source로 허용하며, 패킹 시 최상위 `mod-info.json`을 생성한다.
     - ZIP 내부 root DLL이 발견되면 `plugins/` 기준 변환 확인을 띄우고, 확인 시 모든 non-mod-info entry 앞에 `plugins/`를 붙인다.
@@ -325,11 +350,12 @@ type ZipEntryInfo = {
 | 모드 이름    | 패키지 표시 이름 + 컬렉션 뱃지                      |
 | 제작자      | 패키지 제작자                                 |
 | 상태       | Chip: 활성/비활성/혼합                         |
+| 내보내기    | DownloadIcon (로컬 ZIP 추가로 재설치 가능한 배포 ZIP 생성) |
 | 설정       | SettingsIcon (설정 없으면 greyed out)        |
 | 삭제       | DeleteIcon                              |
 
 - 행 hover 하이라이트
-- 우클릭 컨텍스트 메뉴: 모드관리, 상세정보, 모드설정, 삭제
+- 우클릭 컨텍스트 메뉴: 모드관리, 상세정보, 모드설정, 내보내기, 삭제
 - 비활성 행 opacity 45%
 - collection 펼침 시 child DLL 행 들여쓰기 표시
 

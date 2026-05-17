@@ -32,12 +32,69 @@ type OnlineModCatalogItem = {
     description: string;
     version: string;
     downloadPath: string;
+    readmePath?: string;
     sha256?: string;
     gameIds?: string[];
     installedPackageId?: string;
     installedVersion?: string;
     installed?: boolean;
     updateAvailable?: boolean;
+};
+
+type ModDistributionInput = {
+    id: string;
+    name: string;
+    author: string;
+    description: string;
+    version: string;
+    zipPath?: string;
+    readmeFilePath?: string;
+    readmePath?: string;
+    downloadPath?: string;
+    sha256?: string;
+    gameIds?: string[];
+};
+
+type OnlineAssetPackCatalogItem = {
+    id: string;
+    name: string;
+    author?: string;
+    description?: string;
+    version: string;
+    downloadPath: string;
+    thumbnailPath?: string;
+    sha256?: string;
+    gameIds?: string[];
+    installedPackId?: string;
+    installedVersion?: string;
+    installed?: boolean;
+    updateAvailable?: boolean;
+    thumbnailUrl?: string;
+};
+
+type AssetPackDistributionInput = {
+    id: string;
+    name: string;
+    author?: string;
+    description?: string;
+    version: string;
+    zipPath?: string;
+    thumbnailPath?: string;
+    gameIds?: string[];
+    targets?: Array<{
+        catalogId: string;
+        category: string;
+        option1?: string;
+        gender?: string;
+        option1Label?: string;
+        option2?: string;
+        displayLabel?: string;
+        textureName: string;
+        pathId: number;
+        size?: [number, number];
+        pngPath: string;
+        previewPath?: string;
+    }>;
 };
 
 type LaunchGameResult = {
@@ -72,12 +129,24 @@ const electronAPI = {
     setGamePath: (gamePath: string, gameId?: string) => ipcRenderer.invoke('config:set-game-path', gamePath, gameId),
     selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
     getGitHubReleases: (): Promise<GitHubRelease[]> => ipcRenderer.invoke('github:get-releases'),
+    readManualDocument: (documentPath: string): Promise<string> =>
+        ipcRenderer.invoke('docs:read-manual', documentPath),
     launchGame: (): Promise<LaunchGameResult> => ipcRenderer.invoke('game:launch'),
+    getDeveloperAccessStatus: () => ipcRenderer.invoke('developer:get-access-status'),
+    verifyDeveloperPassword: (password: string) => ipcRenderer.invoke('developer:verify-password', password),
 
     // Mod Manager
     scanMods: () => ipcRenderer.invoke('mods:scan'),
     getOnlineModCatalog: (): Promise<OnlineModCatalogItem[]> =>
         ipcRenderer.invoke('mods:get-online-catalog'),
+    getOnlineModReadme: (readmePath: string): Promise<string> =>
+        ipcRenderer.invoke('mods:get-online-readme', readmePath),
+    getModDistributionCatalog: (): Promise<OnlineModCatalogItem[]> =>
+        ipcRenderer.invoke('mods:get-distribution-catalog'),
+    saveModDistributionItem: (input: ModDistributionInput) =>
+        ipcRenderer.invoke('mods:save-distribution-item', input),
+    deleteModDistributionItem: (id: string) =>
+        ipcRenderer.invoke('mods:delete-distribution-item', id),
     downloadOnlineMod: (item: OnlineModCatalogItem) =>
         ipcRenderer.invoke('mods:download-online-mod', item),
     updateOnlineMod: (item: OnlineModCatalogItem) =>
@@ -130,9 +199,13 @@ const electronAPI = {
 
     deletePackage: (packageId: string) =>
         ipcRenderer.invoke('mods:delete-package', packageId),
+    exportPackage: (packageId: string, savePath: string): Promise<string> =>
+        ipcRenderer.invoke('mods:export-package', packageId, savePath),
 
     getPackageSettings: (packageId: string) =>
         ipcRenderer.invoke('mods:get-package-settings', packageId),
+    getPackageReadme: (packageId: string): Promise<string> =>
+        ipcRenderer.invoke('mods:get-package-readme', packageId),
     applyPackageSettings: (packageId: string, changes: any) =>
         ipcRenderer.invoke('mods:apply-package-settings', packageId, changes),
     applyCfgValue: (configPath: string, section: string, key: string, value: string) =>
@@ -156,6 +229,12 @@ const electronAPI = {
     restoreAssetBackup: (type: 'font' | 'asset') => ipcRenderer.invoke('asset:restore-backup', type),
     getTextureCatalog: () => ipcRenderer.invoke('asset:get-texture-catalog'),
     getAssetCatalog: () => ipcRenderer.invoke('asset:get-catalog'),
+    getCatalogEditorData: () => ipcRenderer.invoke('asset:get-catalog-editor-data'),
+    saveCatalogEditorData: (catalog: any) => ipcRenderer.invoke('asset:save-catalog-editor-data', catalog),
+    getCurrentAssetPacks: () => ipcRenderer.invoke('asset:get-current-asset-packs'),
+    saveCurrentAssetPacks: (entries: any[]) => ipcRenderer.invoke('asset:save-current-asset-packs', entries),
+    clearCurrentAssetPacks: () => ipcRenderer.invoke('asset:clear-current-asset-packs'),
+    importCatalogPreviewImage: (params: any) => ipcRenderer.invoke('asset:import-catalog-preview-image', params),
     getFontTargets: () => ipcRenderer.invoke('asset:get-font-targets'),
     getStoredFonts: () => ipcRenderer.invoke('asset:get-stored-fonts'),
     importFont: (sourcePath: string) => ipcRenderer.invoke('asset:import-font', sourcePath),
@@ -179,7 +258,7 @@ const electronAPI = {
         settingsScript?: unknown;
         sources?: Array<{
             sourcePath: string;
-            sourceKind: 'dll' | 'zip';
+            sourceKind: 'dll' | 'zip' | 'file';
             name: string;
             author: string;
             description?: string;
@@ -222,8 +301,18 @@ const electronAPI = {
 
     // Asset Pack preloads
     getAssetPacks: () => ipcRenderer.invoke('asset:get-packs'),
+    getOnlineAssetPackCatalog: (): Promise<OnlineAssetPackCatalogItem[]> =>
+        ipcRenderer.invoke('asset:get-online-packs'),
+    downloadOnlineAssetPack: (item: OnlineAssetPackCatalogItem) =>
+        ipcRenderer.invoke('asset:download-online-pack', item),
+    updateOnlineAssetPack: (item: OnlineAssetPackCatalogItem) =>
+        ipcRenderer.invoke('asset:update-online-pack', item),
     selectAssetPackZip: () => ipcRenderer.invoke('asset:select-pack-zip'),
+    selectAssetPackThumbnail: () => ipcRenderer.invoke('asset:select-pack-thumbnail'),
+    selectAssetPackPngs: () => ipcRenderer.invoke('asset:select-pack-pngs'),
     importAssetPack: (zipPath: string) => ipcRenderer.invoke('asset:import-pack', zipPath),
+    createAssetPackDistribution: (input: AssetPackDistributionInput) =>
+        ipcRenderer.invoke('asset:create-pack-distribution', input),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

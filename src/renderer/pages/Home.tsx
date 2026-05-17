@@ -1,8 +1,8 @@
 // src/renderer/pages/Home.tsx
 // HexX Forge 홈 화면입니다.
 
-import { useEffect, useMemo, useState } from 'react';
-import { Box, Button, Card, CardActionArea, CardContent, Chip, Collapse, Link, Stack, Typography } from '@mui/material';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { Box, Button, Card, CardActionArea, CardContent, Chip, CircularProgress, Collapse, Link, Stack, Typography } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useNotification } from '../context/NotificationContext';
@@ -36,7 +36,7 @@ const docCards: DocCard[] = [
         titleKey: 'nav.modForge',
         descKey: 'home.doc.mod.desc',
         statusKey: 'home.doc.mod.status',
-        docs: 'docs/modules/mod-manager.md',
+        docs: 'docs/manuals/mod-forge.md',
         detailKey: 'home.doc.mod.detail'
     },
     {
@@ -44,7 +44,7 @@ const docCards: DocCard[] = [
         titleKey: 'nav.assetForge',
         descKey: 'home.doc.asset.desc',
         statusKey: 'home.doc.asset.status',
-        docs: 'docs/modules/asset-manager.md',
+        docs: 'docs/manuals/asset-forge.md',
         detailKey: 'home.doc.asset.detail'
     },
     {
@@ -52,7 +52,7 @@ const docCards: DocCard[] = [
         titleKey: 'nav.visualForge',
         descKey: 'home.doc.graphics.desc',
         statusKey: 'home.doc.graphics.status',
-        docs: 'docs/modules/graphics-tool.md',
+        docs: 'docs/manuals/visual-forge.md',
         detailKey: 'home.doc.graphics.detail'
     },
     {
@@ -60,7 +60,7 @@ const docCards: DocCard[] = [
         titleKey: 'nav.coreLab',
         descKey: 'home.doc.cheat.desc',
         statusKey: 'home.doc.cheat.status',
-        docs: '',
+        docs: 'docs/manuals/core-lab.md',
         detailKey: 'home.doc.cheat.detail'
     },
     {
@@ -68,7 +68,7 @@ const docCards: DocCard[] = [
         titleKey: 'nav.synthesisLab',
         descKey: 'home.doc.optimizer.desc',
         statusKey: 'home.doc.optimizer.status',
-        docs: '',
+        docs: 'docs/manuals/synthesis-lab.md',
         detailKey: 'home.doc.optimizer.detail'
     },
     {
@@ -76,7 +76,7 @@ const docCards: DocCard[] = [
         titleKey: 'nav.settings',
         descKey: 'home.doc.settings.desc',
         statusKey: 'home.doc.settings.status',
-        docs: '',
+        docs: 'docs/manuals/settings.md',
         detailKey: 'home.doc.settings.detail'
     }
 ];
@@ -93,6 +93,9 @@ export default function Home({ onOpenSettings }: Props) {
     const [launchingGame, setLaunchingGame] = useState(false);
     const [openCardId, setOpenCardId] = useState<string | null>(null);
     const [docsCardId, setDocsCardId] = useState<string | null>(null);
+    const [docsContentByPath, setDocsContentByPath] = useState<Record<string, string>>({});
+    const [docsLoadingPath, setDocsLoadingPath] = useState<string | null>(null);
+    const [docsErrorPath, setDocsErrorPath] = useState<string | null>(null);
 
     useEffect(() => {
         window.electronAPI.getVersion().then(setVersion);
@@ -144,6 +147,30 @@ export default function Home({ onOpenSettings }: Props) {
             });
         } finally {
             setLaunchingGame(false);
+        }
+    };
+
+    const handleToggleDocs = async (card: DocCard, docsOpen: boolean) => {
+        if (docsOpen) {
+            setDocsCardId(null);
+            return;
+        }
+
+        setDocsCardId(card.id);
+        if (!card.docs || docsContentByPath[card.docs] || docsLoadingPath === card.docs) return;
+
+        setDocsLoadingPath(card.docs);
+        setDocsErrorPath(null);
+        try {
+            const content = await window.electronAPI.readManualDocument(card.docs);
+            setDocsContentByPath((current) => ({ ...current, [card.docs]: content }));
+        } catch (error) {
+            setDocsErrorPath(card.docs);
+            showNotification(t('home.docs.loadFailed', currentLanguage), 'error', {
+                copyText: getErrorMessage(error)
+            });
+        } finally {
+            setDocsLoadingPath((current) => (current === card.docs ? null : current));
         }
     };
 
@@ -321,7 +348,7 @@ export default function Home({ onOpenSettings }: Props) {
                                                 size="small"
                                                 onClick={(event) => {
                                                     event.stopPropagation();
-                                                    setDocsCardId(docsOpen ? null : card.id);
+                                                    void handleToggleDocs(card, docsOpen);
                                                 }}
                                                 sx={{ mt: 1.5, color: 'var(--text-color)', borderColor: 'var(--border-color)' }}
                                             >
@@ -344,9 +371,12 @@ export default function Home({ onOpenSettings }: Props) {
                                                     <Typography sx={{ mt: 1, color: 'var(--text-color-light)', fontSize: 13 }}>
                                                         {t('home.docs.connectedDocument', currentLanguage)} {card.docs || t('home.docs.notReady', currentLanguage)}
                                                     </Typography>
-                                                    <Typography sx={{ mt: 1, color: 'var(--text-color-secondary)', fontSize: 13 }}>
-                                                        {t('home.docs.nextStep', currentLanguage)}
-                                                    </Typography>
+                                                    <ManualDocument
+                                                        content={card.docs ? docsContentByPath[card.docs] : ''}
+                                                        loading={docsLoadingPath === card.docs}
+                                                        error={docsErrorPath === card.docs}
+                                                        language={currentLanguage}
+                                                    />
                                                 </Box>
                                             </Collapse>
                                         </Box>
@@ -359,6 +389,142 @@ export default function Home({ onOpenSettings }: Props) {
             </Box>
         </Box>
     );
+}
+
+function ManualDocument({
+    content,
+    loading,
+    error,
+    language
+}: {
+    content: string;
+    loading: boolean;
+    error: boolean;
+    language: LanguageCode;
+}) {
+    if (loading) {
+        return (
+            <Stack direction="row" spacing={1.25} sx={{ mt: 2, alignItems: 'center', color: 'var(--text-color-light)' }}>
+                <CircularProgress size={18} />
+                <Typography sx={{ fontSize: 13 }}>{t('home.docs.loading', language)}</Typography>
+            </Stack>
+        );
+    }
+
+    if (error) {
+        return (
+            <Typography sx={{ mt: 2, color: 'error.main', fontSize: 13 }}>
+                {t('home.docs.loadFailed', language)}
+            </Typography>
+        );
+    }
+
+    if (!content) {
+        return (
+            <Typography sx={{ mt: 1, color: 'var(--text-color-secondary)', fontSize: 13 }}>
+                {t('home.docs.nextStep', language)}
+            </Typography>
+        );
+    }
+
+    return (
+        <Box sx={manualViewerSx}>
+            {renderMarkdown(content)}
+        </Box>
+    );
+}
+
+function renderMarkdown(content: string) {
+    return content
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map((line, index) => renderMarkdownLine(line, index))
+        .filter(Boolean);
+}
+
+function renderMarkdownLine(line: string, index: number) {
+    const trimmed = line.trim();
+    if (!trimmed) return <Box key={index} sx={{ height: 8 }} />;
+
+    const heading = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+    if (heading) {
+        const level = heading[1].length;
+        return (
+            <Typography
+                key={index}
+                variant={level === 1 ? 'h5' : level === 2 ? 'h6' : 'subtitle1'}
+                sx={{
+                    mt: level === 1 ? 0 : 2,
+                    mb: 0.75,
+                    color: 'var(--text-color)',
+                    fontWeight: 900,
+                    fontSize: level === 1 ? 22 : level === 2 ? 18 : 15
+                }}
+            >
+                {renderInlineMarkdown(heading[2])}
+            </Typography>
+        );
+    }
+
+    if (trimmed.startsWith('[스크린샷:')) {
+        return (
+            <Box key={index} sx={screenshotPlaceholderSx}>
+                {renderInlineMarkdown(trimmed)}
+            </Box>
+        );
+    }
+
+    const ordered = /^\d+\.\s+(.+)$/.exec(trimmed);
+    if (ordered) {
+        return (
+            <Typography key={index} sx={manualListItemSx}>
+                <Box component="span" sx={manualBulletSx}>{`${trimmed.split('.')[0]}.`}</Box>
+                {renderInlineMarkdown(ordered[1])}
+            </Typography>
+        );
+    }
+
+    const bullet = /^-\s+(.+)$/.exec(trimmed);
+    if (bullet) {
+        return (
+            <Typography key={index} sx={manualListItemSx}>
+                <Box component="span" sx={manualBulletSx}>-</Box>
+                {renderInlineMarkdown(bullet[1])}
+            </Typography>
+        );
+    }
+
+    return (
+        <Typography key={index} sx={{ my: 0.75, color: 'var(--text-color-light)', fontSize: 14, lineHeight: 1.75 }}>
+            {renderInlineMarkdown(trimmed)}
+        </Typography>
+    );
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+    return text.split(/(`[^`]+`)/g).filter(Boolean).map((part, index) => {
+        if (part.startsWith('`') && part.endsWith('`')) {
+            return (
+                <Box
+                    key={index}
+                    component="code"
+                    sx={{
+                        px: 0.5,
+                        py: 0.15,
+                        borderRadius: 0.5,
+                        color: 'var(--text-color)',
+                        backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, transparent)',
+                        fontFamily: 'monospace',
+                        fontSize: '0.92em'
+                    }}
+                >
+                    {part.slice(1, -1)}
+                </Box>
+            );
+        }
+
+        return part;
+    });
 }
 
 function StatusItem({ label, value, tone = 'normal' }: { label: string; value: string; tone?: 'normal' | 'warning' }) {
@@ -495,4 +661,46 @@ const newsItemSx = {
     border: '1px solid var(--border-color)',
     borderRadius: 1,
     background: 'var(--input-bg-color)'
+};
+
+const manualViewerSx = {
+    mt: 2,
+    maxHeight: 560,
+    overflowY: 'auto' as const,
+    pr: 1,
+    color: 'var(--text-color)',
+    '&::-webkit-scrollbar': {
+        width: 8
+    },
+    '&::-webkit-scrollbar-thumb': {
+        backgroundColor: 'var(--border-color)',
+        borderRadius: 1
+    }
+};
+
+const manualListItemSx = {
+    my: 0.5,
+    pl: 2.5,
+    color: 'var(--text-color-light)',
+    fontSize: 14,
+    lineHeight: 1.65,
+    position: 'relative' as const
+};
+
+const manualBulletSx = {
+    position: 'absolute' as const,
+    left: 0,
+    color: 'var(--primary-color)',
+    fontWeight: 800
+};
+
+const screenshotPlaceholderSx = {
+    my: 1.25,
+    p: 1.25,
+    border: '1px dashed var(--border-color)',
+    borderRadius: 1,
+    color: 'var(--text-color-secondary)',
+    background: 'color-mix(in srgb, var(--primary-color) 8%, transparent)',
+    fontSize: 13,
+    lineHeight: 1.6
 };

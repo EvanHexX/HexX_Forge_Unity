@@ -457,6 +457,32 @@ function buildFrei0rFilter(name: string, params: string[]): string {
     return `frei0r=${name}:${params.join('|')}`;
 }
 
+function clamp01(value: number, fallback: number): number {
+    if (!Number.isFinite(value)) return fallback;
+    return Math.max(0, Math.min(1, value));
+}
+
+function buildAlphaChannelAdjustFilter(alpha: NonNullable<ShotcutVideoFilters['alphaChannelAdjust']>): string {
+    const operation = clamp01(alpha.operation, 0);
+    const amount = clamp01(alpha.amount, 0.5);
+    const threshold = Math.round(clamp01(alpha.threshold, amount) * 255);
+    let expression = 'val';
+
+    if (operation >= 0.75 && operation < 0.9) {
+        expression = `if(gte(val\\,${threshold})\\,255\\,0)`;
+    } else if (operation > 0 && operation < 0.5) {
+        expression = escapedClip(`val*${Math.max(0, 1 - amount).toFixed(4)}`, '0', '255');
+    } else if (operation >= 0.5 && operation < 0.8) {
+        expression = escapedClip(`val+(255-val)*${amount.toFixed(4)}`, '0', '255');
+    }
+
+    if (alpha.invert) {
+        expression = `255-(${expression})`;
+    }
+
+    return `lut=a='${expression}'`;
+}
+
 function buildShotcutFilterSegments(filters?: ShotcutVideoFilters): string[] {
     const result: string[] = [];
 
@@ -497,14 +523,7 @@ function buildShotcutFilterSegments(filters?: ShotcutVideoFilters): string[] {
 
     const alpha = filters.alphaChannelAdjust;
     if (alpha?.enabled) {
-        result.push(buildFrei0rFilter('alpha0ps', [
-            '0',
-            '0',
-            numberParam(alpha.operation, 0),
-            numberParam(alpha.threshold, 0.5),
-            numberParam(alpha.amount, 0.5),
-            boolToFrei0r(alpha.invert),
-        ]));
+        result.push(buildAlphaChannelAdjustFilter(alpha));
     }
 
     const saturation = filters.saturation;
@@ -807,13 +826,14 @@ function buildVideoFilter(options: VideoExportOptions, hasChromaMask: boolean): 
     const y = Math.round(options.transform.y * scaleFactor);
     const overlayX = `(W-w)/2+${x}`;
     const overlayY = `(H-h)/2+${y}`;
+    const transparentBase = `color=c=black@0:s=${width}x${height}:r=30,format=rgba`;
     const filters = buildVideoBranchFilters(options, true);
 
     if (hasChromaMask) {
         const originalFilters = buildVideoBranchFilters(options, false);
         return [
-            `nullsrc=s=${width}x${height}:r=30,format=rgba[base_original]`,
-            `nullsrc=s=${width}x${height}:r=30,format=rgba[base_keyed]`,
+            `${transparentBase}[base_original]`,
+            `${transparentBase}[base_keyed]`,
             `[0:v]${originalFilters.join(',')}[fg_original]`,
             `[base_original][fg_original]overlay=${overlayX}:${overlayY}:format=auto:shortest=1,format=rgba[original]`,
             `[0:v]${filters.join(',')}[fg_keyed]`,
@@ -823,7 +843,7 @@ function buildVideoFilter(options: VideoExportOptions, hasChromaMask: boolean): 
         ].join(';');
     }
 
-    return `nullsrc=s=${width}x${height}:r=30,format=rgba[base];[0:v]${filters.join(',')}[fg];[base][fg]overlay=${overlayX}:${overlayY}:format=auto:shortest=1,format=yuva420p`;
+    return `${transparentBase}[base];[0:v]${filters.join(',')}[fg];[base][fg]overlay=${overlayX}:${overlayY}:format=auto:shortest=1,format=yuva420p`;
 }
 
 async function selectExportPath(defaultName: string, extension: 'png' | 'webm') {

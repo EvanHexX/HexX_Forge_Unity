@@ -1,7 +1,7 @@
 // src/renderer/types/modTypes.ts
 // modService와 ModManager 사이의 공유 타입 (IPC 경계)
 
-export type ModFileType = 'dll' | 'asset' | 'mod-info' | 'script' | 'config' | 'folder';
+export type ModFileType = 'dll' | 'asset' | 'mod-info' | 'script' | 'config' | 'folder' | 'readme';
 
 export const MOD_FILE_TYPE_LABELS: Record<ModFileType, string> = {
     dll: 'DLL',
@@ -10,6 +10,7 @@ export const MOD_FILE_TYPE_LABELS: Record<ModFileType, string> = {
     script: 'Script',
     config: 'Config',
     folder: 'Folder',
+    readme: 'README',
 };
 
 export const COMMON_FOLDER_NAMES = [
@@ -33,6 +34,7 @@ export type ModPackage = {
     enabled: boolean | 'mixed';
     dlls: DllEntry[];
     hasSettings: boolean;
+    readmePath?: string;
     dependency?: PackageDependency;
     dependencyState?: 'ok' | 'missing' | 'disabled';
     dependencyParentId?: string;
@@ -52,6 +54,7 @@ export type ModPackageSource = {
     type: 'github';
     catalogId: string;
     downloadPath: string;
+    readmePath?: string;
 };
 
 export type OnlineModCatalogItem = {

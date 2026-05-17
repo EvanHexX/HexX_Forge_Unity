@@ -12,12 +12,14 @@ import {
     createAndImportPackage,
     deleteMod,
     deletePackage,
+    exportPackage,
     getPackageSettings,
     importDllMod,
     importZipMod,
     importZipWithConfig,
     inspectZip,
     packMod,
+    readPackageReadme,
     readConfigFileText,
     scanMods,
     setDllEnabled,
@@ -27,8 +29,13 @@ import {
 } from '../services/modService';
 import type { ApplyPackageSettingsChanges, ModFileType, ScriptConfig } from '../services/modService';
 import {
+    deleteModDistributionItem,
+    getModDistributionCatalog,
     getOnlineModCatalog,
+    getOnlineModReadme,
     installOnlineMod,
+    saveModDistributionItem,
+    type ModDistributionInput,
     updateOnlineMod,
     type OnlineModCatalogItem,
 } from '../services/modCatalogService';
@@ -37,6 +44,20 @@ export function registerModIpc(): void {
     ipcMain.handle('mods:scan', () => scanMods());
 
     ipcMain.handle('mods:get-online-catalog', () => getOnlineModCatalog());
+
+    ipcMain.handle('mods:get-online-readme', (_event, readmePath: string) =>
+        getOnlineModReadme(readmePath)
+    );
+
+    ipcMain.handle('mods:get-distribution-catalog', () => getModDistributionCatalog());
+
+    ipcMain.handle('mods:save-distribution-item', (_event, input: ModDistributionInput) =>
+        saveModDistributionItem(input)
+    );
+
+    ipcMain.handle('mods:delete-distribution-item', (_event, id: string) =>
+        deleteModDistributionItem(id)
+    );
 
     ipcMain.handle('mods:download-online-mod', (_event, item: OnlineModCatalogItem) =>
         installOnlineMod(item)
@@ -62,6 +83,10 @@ export function registerModIpc(): void {
         deletePackage(packageId)
     );
 
+    ipcMain.handle('mods:export-package', (_event, packageId: string, savePath: string) =>
+        exportPackage(packageId, savePath)
+    );
+
     ipcMain.handle('mods:delete', (_event, relativePath: string) =>
         deleteMod(relativePath)
     );
@@ -71,9 +96,10 @@ export function registerModIpc(): void {
             title: '모드 파일 선택',
             properties: ['openFile'],
             filters: [
-                { name: 'Mod File', extensions: ['dll', 'zip'] },
+                { name: 'Mod File', extensions: ['dll', 'zip', 'md', 'markdown'] },
                 { name: 'DLL', extensions: ['dll'] },
                 { name: 'ZIP', extensions: ['zip'] },
+                { name: 'Markdown', extensions: ['md', 'markdown'] },
             ],
         });
         if (result.canceled || result.filePaths.length === 0) return null;
@@ -179,6 +205,10 @@ export function registerModIpc(): void {
         getPackageSettings(packageId)
     );
 
+    ipcMain.handle('mods:get-package-readme', (_event, packageId: string) =>
+        readPackageReadme(packageId)
+    );
+
     ipcMain.handle(
         'mods:apply-package-settings',
         (_event, packageId: string, changes: ApplyPackageSettingsChanges) =>
@@ -218,7 +248,7 @@ export function registerModIpc(): void {
                 settingsScript?: ScriptConfig | null;
                 sources?: Array<{
                     sourcePath: string;
-                    sourceKind: 'dll' | 'zip';
+                    sourceKind: 'dll' | 'zip' | 'file';
                     name: string;
                     author: string;
                     description?: string;

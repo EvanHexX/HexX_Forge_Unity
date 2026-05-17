@@ -1,12 +1,5 @@
 # TODO
 
-## Home
-
-- Cheat Engine 상세 기능 설명서 작성
-- Optimizer 상세 기능 설명서 작성
-- Settings 상세 기능 설명서 작성
-- Home 카드에서 실제 문서 뷰어 또는 내부 문서 preview 연결 검토
-
 ## Settings
 
 - 추가 지원 게임이 생기면 `selectedGameId`와 `gamePaths` 기반으로 게임별 install hint, 검증 규칙 추가
@@ -24,6 +17,15 @@
 - 모드 패킹 설명서 팝업 plain markdown 표시를 rich markdown renderer로 고도화 검토
 - 파일관리 `linkedConfigPath`/`linkedConfigArrayPath` metadata를 실제 설정 적용 시 JSON 파일 추가/삭제와 연동
 - 온라인 모드 update 시 package 상태 보존 범위 확대
+
+## Asset Manager
+
+- UI 타이틀 / UI 메인배경 실제 적용 전 `scripts/verify-release.mjs`의 `ui_textures.tsv` release packaging 검증이 통과하는지 확인한다.
+- 온라인 어셋팩 catalog는 `asset-packs/index.json`을 사용한다. GitHub raw 반영 전에는 앱 온라인 탭에서 빈 목록 또는 404가 보일 수 있으므로 배포 파일 커밋/push 후 확인한다.
+- Catalog Editor는 v2 최소 편집 기능만 제공한다. pack.json 생성/수정 wizard와 metadata 자동 동기화는 후속 작업으로 검토한다.
+- 어셋팩 배포 도구는 PNG별 target 입력으로 pack.json/ZIP을 생성한다. 추후 대상 metadata를 UnityPy TSV에서 자동 제안하는 기능을 검토한다.
+- UI가 아닌 신규 asset patch API를 추가할 때는 `ui_textures.tsv`에 섞지 말고 별도 UnityPy metadata 파일, plan kind, Electron routing, 문서 표를 함께 추가한다.
+- 어셋팩 기능 릴리즈 시 minor version bump를 적용한다.
 
 ## I18n Migration
 

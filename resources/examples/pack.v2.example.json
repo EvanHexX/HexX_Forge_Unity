@@ -1,0 +1,34 @@
+{
+  "packId": "hexx_clothes_upscale_v1",
+  "packName": "HexX Clothes Upscale V1",
+  "version": "1.0.0",
+  "gameId": "LongYinLiZhiZhuan",
+  "targets": [
+    {
+      "targetId": "outfit_female_천산파_skeleton_17_156",
+      "catalogId": "outfit_female_천산파_skeleton_17_156",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "천산파",
+      "textureName": "skeleton_17",
+      "pathId": 156,
+      "size": [940, 2061],
+      "png": "files/female/skeleton_17.png",
+      "preview": "previews/female/skeleton_17_preview.png",
+      "label": "천산파 여성 의상"
+    },
+    {
+      "targetId": "outfit_male_천산파_skeleton_17_157",
+      "catalogId": "outfit_male_천산파_skeleton_17_157",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "천산파",
+      "textureName": "skeleton_17",
+      "pathId": 157,
+      "size": [940, 2061],
+      "png": "files/male/skeleton_17.png",
+      "preview": "previews/male/skeleton_17_preview.png",
+      "label": "천산파 남성 의상"
+    }
+  ]
+}

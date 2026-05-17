@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "items": [
+    {
+      "id": "outfit_female_천산파_skeleton_17_156",
+      "category": "outfit",
+      "gender": "female",
+      "option2": "천산파",
+      "textureName": "skeleton_17",
+      "pathId": 156,
+      "size": [940, 2061],
+      "label": "천산파 여성 의상 skeleton_17",
+      "preview": "resources/previews/female/skeleton_17_preview.png"
+    },
+    {
+      "id": "outfit_male_천산파_skeleton_17_157",
+      "category": "outfit",
+      "gender": "male",
+      "option2": "천산파",
+      "textureName": "skeleton_17",
+      "pathId": 157,
+      "size": [940, 2061],
+      "label": "천산파 남성 의상 skeleton_17",
+      "preview": "resources/previews/male/skeleton_17_preview.png"
+    }
+  ]
+}

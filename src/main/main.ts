@@ -14,6 +14,7 @@ import { registerAssetPatcherIpc } from './ipc/assetPatcherIpc';
 import { registerTextureIpc } from './ipc/textureIpc';
 import { registerAssetPackIpc } from './ipc/assetPackIpc';
 import { registerGraphicsIpc } from './ipc/graphicsIpc';
+import { registerDeveloperAccessIpc } from './ipc/developerAccessIpc';
 import { registerUpdateIpc } from './services/updateService';
 import { resolveGraphicsFile, resolveSelectedMediaFile } from './services/graphicsService';
 import { getAppRootDir, getBundledStoragePath, getStoragePath } from './services/runtimePaths';
@@ -295,11 +296,37 @@ function resolveStoredFontFile(rawPath: string): string {
     return candidates.find((candidate) => fsSync.existsSync(candidate)) || '';
 }
 
+function resolveManualDocument(rawPath: string): string {
+    const safeRelativePath = normalizeRelativePath(rawPath);
+    const manualRoot = path.join('docs', 'manuals');
+
+    if (!safeRelativePath) return '';
+    if (safeRelativePath !== manualRoot && !safeRelativePath.startsWith(`${manualRoot}${path.sep}`)) return '';
+    if (path.extname(safeRelativePath).toLowerCase() !== '.md') return '';
+
+    const candidates = getRootCandidates().map((root) => path.join(root, safeRelativePath));
+
+    return candidates.find((candidate) => fsSync.existsSync(candidate)) || '';
+}
+
 app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
 
     ipcMain.handle('app:get-version', () => app.getVersion());
     ipcMain.handle('github:get-releases', () => fetchGitHubReleases());
+    ipcMain.handle('docs:read-manual', async (_event, documentPath: string) => {
+        if (typeof documentPath !== 'string') {
+            throw new Error('Invalid manual document path');
+        }
+
+        const manualPath = resolveManualDocument(documentPath);
+
+        if (!manualPath) {
+            throw new Error(`Manual document not found: ${documentPath}`);
+        }
+
+        return fs.readFile(manualPath, 'utf-8');
+    });
 
     registerConfigIpc();
     registerModIpc();
@@ -308,6 +335,7 @@ app.whenReady().then(() => {
     registerAssetPatcherIpc();
     registerAssetPackIpc();
     registerGraphicsIpc();
+    registerDeveloperAccessIpc();
     registerUpdateIpc();
 
     protocol.handle('hexx-resource', async (request) => {

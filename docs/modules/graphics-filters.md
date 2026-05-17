@@ -25,7 +25,7 @@ Each entry should include:
 | --- | --- | --- | --- | --- | --- | --- |
 | `chromaKeyAdvanced` | Chroma Key: Advanced | 크로마 키: 고급 | 色鍵：進階 | `references/shotcut-master/src/qml/filters/select0r` | `frei0r.select0r` | `select0r.dll` |
 | `keySpillAdvanced` | Key Spill: Advanced | 키 스필: 고급 | 色键溢色: 高级 | `references/shotcut-master/src/qml/filters/keyspillm0pup` | `frei0r.keyspillm0pup` | `keyspillm0pup.dll` |
-| `alphaChannelAdjust` | Alpha Channel: Adjust | 알파 채널: 조정 | 透明通道: 调节 | `references/shotcut-master/src/qml/filters/alpha_adjust` | `frei0r.alpha0ps` | `alpha0ps_alpha0ps.dll` |
+| `alphaChannelAdjust` | Alpha Channel: Adjust | 알파 채널: 조정 | 透明通道: 调节 | `references/shotcut-master/src/qml/filters/alpha_adjust` | `frei0r.alpha0ps` reference, FFmpeg `lut` export approximation | `alpha0ps_alpha0ps.dll` |
 | `saturation` | Saturation | 채도 | 饱和度 | `references/shotcut-master/src/qml/filters/saturation` | `frei0r.saturat0r` | `saturat0r.dll` |
 | `contrast` | Contrast | 대비 | 對比 | `references/shotcut-master/src/qml/filters/contrast` | `lift_gamma_gain` | FFmpeg approximation |
 | `colorGrading` | Color Grading | 색 보정 | 颜色分级 | `references/shotcut-master/src/qml/filters/color` | `lift_gamma_gain` style controls | FFmpeg approximation |
@@ -66,12 +66,15 @@ Shotcut uses `frei0r.keyspillm0pup`.
 
 ### Alpha Channel: Adjust
 
-Shotcut uses `frei0r.alpha0ps`.
+Shotcut uses `frei0r.alpha0ps`, but the bundled Windows frei0r DLL is named `alpha0ps_alpha0ps.dll` and FFmpeg rejects explicit values for its boolean parameters in local testing. HexX Forge therefore exports Alpha Channel: Adjust through a native FFmpeg `lut` alpha approximation instead of calling `frei0r=alpha0ps`.
 
 - `2`: operation
 - `3`: threshold
 - `4`: amount
 - `5`: invert
+- `Threshold` maps to an alpha threshold expression.
+- Shrink/shave and grow modes map to alpha decrease/increase approximations.
+- `Invert` maps to `255-alpha`.
 
 ### Saturation
 
@@ -83,9 +86,16 @@ Shotcut uses MLT `lift_gamma_gain` or GPU `movit.lift_gamma_gain` for exact lift
 
 ## Renderer Preview
 
-Viewport preview is intentionally approximate. Saturation, contrast, and color presets use browser CSS filters where possible. Chroma key, key spill, alpha channel adjustment, and color grading use a renderer canvas pass over the visible preview size so filter changes appear immediately without running FFmpeg on every slider move. Export remains the source of truth and uses the FFmpeg/frei0r filtergraph.
+Viewport preview is intentionally approximate. Saturation, contrast, and color presets use browser CSS filters where possible. Chroma key, key spill, alpha channel adjustment, and color grading use a renderer canvas pass over the visible preview size so filter changes appear immediately without running FFmpeg on every slider move. Export remains the source of truth and uses the FFmpeg/frei0r filtergraph, except Alpha Channel: Adjust which uses a native FFmpeg alpha `lut` approximation to avoid the Windows `alpha0ps` parameter issue.
 
 Color Grading keeps the Shotcut `Shadows (Lift)`, `Midtones (Gamma)`, and `Highlights (Gain)` control model. Preview and export share the same per-channel approximation so the three grading groups do not collapse into one averaged brightness/contrast effect.
+
+2026-05-16 update:
+
+- `select0r` preview는 `shape`, `edge`, `operation`, `invert`를 alpha 값으로 조합한다. 특히 `operation`은 Overwrite/Maximum/Minimum/Add/Subtract의 차이가 preview에 보여야 한다.
+- `Slope` slider는 Shotcut UI와 동일하게 `Edge` mode와 상관없이 항상 표시한다.
+- brush mask preview는 portrait mask 전체를 source canvas에 단순 scale하지 않는다. 현재 transform, source aspect ratio, portrait crop 영역을 기준으로 mask를 media-local preview canvas에 매핑한다.
+- Alpha Channel: Adjust preview는 chroma/key spill 결과 alpha를 대상으로 Threshold, shrink/grow, blur 계열을 mode별로 분리해 근사한다.
 
 ## Runtime Assets
 

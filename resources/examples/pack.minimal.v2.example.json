@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "packId": "hexx_clothes_upscale_v1",
+  "packName": "HexX 의상 업스케일 v1",
+  "author": "HexX",
+  "description": "용윤입지전 의상 업스케일 패키지",
+  "targets": [
+    {
+      "catalogId": "female_outfit_skeleton_17",
+      "gender": "female",
+      "category": "outfit",
+      "option2": "천산파",
+      "textureName": "skeleton_17",
+      "png": "files/female/skeleton_17.png",
+      "preview": "previews/female/skeleton_17_preview.png"
+    }
+  ]
+}

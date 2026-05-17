@@ -1,5 +1,51 @@
 # Regression Notes
 
+## 2026-05-16 Graphics Tool chroma export and preview state
+
+- 증상: Video Tool에서 Chroma Key: Advanced를 적용해 WebM으로 export하면 투명 처리된 영역에 이전 프레임의 잔상처럼 보이는 픽셀이 남을 수 있었다.
+- 원인: export filtergraph가 portrait 합성용 base를 `nullsrc`로 만들고 있어 VP8 alpha 출력에서 투명 배경 의도를 명시적으로 보존하지 못했다. preview 쪽도 select0r `operation`을 `Minimum`처럼만 처리해 `Shape`, `Edge`, `Operation` 변경 효과가 즉시 드러나지 않았다.
+- 예방: export 합성 base는 `color=c=black@0,format=rgba` 투명 source를 사용한다. select0r preview는 `shape`, `edge`, `operation`, `invert`를 alpha 조합으로 반영해야 하며, mask brush preview는 portrait 좌표계를 media frame 좌표계로 crop/scale해서 적용해야 한다.
+- 확인: 2026-05-16 사용자 재테스트에서 Chroma Key: Advanced 적용 후 export 영상의 전 프레임 잔상이 사라진 것을 확인했다.
+- 추가 증상: Chroma Key: Advanced의 `Invert`는 export 결과가 정상인데 renderer preview에서 반대로 표시될 수 있었다.
+- 추가 원인: renderer preview가 app-side `invert` 상태를 FFmpeg/frei0r export에 전달하는 의미와 반대로 alpha selection에 적용했다.
+- 예방: preview의 `invert` 의미는 export와 동일하게 유지한다. app-side `invert=true`는 선택 색을 투명하게 만드는 사용자 의미이며, export의 `select0r` parameter inversion과 혼동하지 않는다.
+- 추가 증상: brush mask를 칠하면 마스크 일부만 필터에 반영되거나 다른 chroma preview 상태가 초기화된 것처럼 보였다.
+- 추가 원인: mask canvas는 `1200 x 1500` portrait 좌표인데 preview pass에서는 이를 media-local canvas 전체로 단순 scale했다.
+- 예방: preview mask sampling은 현재 transform과 source aspect ratio를 기준으로 portrait mask의 media 영역만 잘라서 source preview canvas에 매핑한다.
+
+## 2026-05-16 Graphics Tool packaged alpha export
+
+- 증상: 설치된 ASAR build에서 장인 공방 Video Tool export가 `Could not find module 'alpha0ps'`로 실패했다.
+- 원인: export filtergraph가 `frei0r=alpha0ps`를 생성했지만 번들된 Windows plugin 파일명은 `alpha0ps_alpha0ps.dll`이다. 파일명으로 바꾸면 모듈은 로딩되지만 FFmpeg가 `Display input alpha` boolean parameter 값을 거부해 다른 오류로 이어진다.
+- 예방: export에서는 Alpha Channel: Adjust를 `frei0r.alpha0ps` 직접 호출 대신 native FFmpeg `lut` alpha approximation으로 생성한다. `select0r`, `keyspillm0pup`, `saturat0r`처럼 FFmpeg에서 실제 parameter dry-run이 통과한 frei0r filter만 직접 호출한다.
+
+## 2026-05-15 Mod Manager package export
+
+- 증상: 목록에서 내보낸 ZIP을 `모드 추가 > 로컬 > ZIP`으로 다시 설치할 수 없거나 `mod-info.json` metadata가 손실될 수 있다.
+- 원인: export가 설치 상태 DB를 그대로 복사하거나, 최상위 `mod-info.json`을 재생성하지 않고 기존 nested manifest/source metadata에 의존하면 local import flow와 schema가 어긋난다.
+- 예방: export ZIP은 항상 최상위 `mod-info.json`을 새로 생성하고, `version`, `dependency`, `files`를 보존한다. `enabled`, GitHub `source` 등 로컬 설치 상태는 제외한다.
+- DLL은 활성/비활성 위치에서, non-DLL 배포 파일은 `storage/packages/{packageId}`에서 읽어야 한다. `folder`는 ZIP entry가 아니라 manifest entry로만 유지한다.
+
+## 2026-05-17 Mod Manager online distribution editor
+
+- 증상: 관리자 도구에서 온라인 모드를 추가/수정했지만 앱 온라인 탭에서 404 또는 catalog 형식 오류가 발생할 수 있다.
+- 원인: `downloadPath`와 실제 ZIP 위치가 어긋나거나, `mods/index.json`이 `{ schemaVersion: 1, mods: [] }` 형식을 유지하지 못하면 raw catalog parser가 실패한다.
+- 예방: 배포 도구는 ZIP을 `mods/packages/{modId}/{version}/{modId}.{version}.zip`으로 복사하고 같은 값을 `downloadPath`에 기록한다. 저장 후 `mods/index.json`은 항상 pretty JSON + trailing newline으로 쓴다.
+- 삭제는 catalog 항목만 지우고 package 폴더를 남기면 stale ZIP이 쌓인다. 관리자 삭제는 `mods/packages/{modId}`도 함께 제거한다.
+- Electron 실행 cwd가 repo root가 아니면 현재 폴더의 `mods/index.json`을 읽지 못해 등록된 모드가 비어 보일 수 있다. distribution root 탐색은 `process.cwd()/mods`뿐 아니라 main bundle 기준 repo root 후보도 확인해야 한다.
+- 같은 모드 업데이트를 등록할 때 id를 실수로 바꾸면 기존 catalog item이 중복될 수 있다. 수정 모드에서는 id를 잠그고, `다음 버전 준비`로 version/downloadPath/sha256 갱신 흐름을 사용한다.
+- 모드 README md는 `readme` 파일 타입으로 보존해야 한다. `asset`으로 오탐하면 상세정보에서 표시되지 않고, `config/asset` 배포 경로에 섞일 수 있다.
+- 온라인 자세히보기는 ZIP 내부 파일을 다운로드해서 열지 않는다. catalog item의 `readmePath`가 GitHub raw 기준 markdown 경로를 가리켜야 한다.
+
+## 2026-05-15 Asset Manager catalog editor focus and applied pack state
+
+- 증상: 비밀 Catalog Editor에서 `id` 입력 중 한 글자마다 TextField focus가 빠지고, 사용자가 저장 전 입력을 마치기 어렵다.
+- 원인: catalog row React key가 `id` 값에 의존해 `id` 변경마다 row가 remount되었다.
+- 예방: 편집용 row는 저장 대상 data field와 별개인 stable `rowId`를 key로 사용한다. 사용자가 편집하는 field 값을 React key로 쓰지 않는다.
+- Catalog Editor는 `asset_catalog.json` 원본 target/preview 관리용이다. 변경 PNG는 pack 배포 도구 또는 직접 적용 flow에서만 선택한다.
+- pack 적용 성공 후에는 `config/current_asset_packs.json`에 catalogId별 적용 pack 상태를 기록한다. 미리보기 UI는 이 파일을 기준으로 현재 적용 pack preview를 우선 표시한다.
+- 어셋 백업 복원이나 외부 게임 업데이트로 원본 파일이 돌아간 뒤 `current_asset_packs.json`이 남아 있으면 UI가 잘못된 pack preview를 현재 상태처럼 보여준다. 어셋 복원 시 자동 초기화하고, 외부 복원 대응용 수동 초기화 버튼을 유지한다.
+
 ## 2026-05-11 Graphics Tool preview parity
 
 - 증상: Video Tool에서 `Color Grading`을 조정해도 viewport에 적용되지 않거나, `Alpha Channel: Adjust`가 단순 alpha 배율처럼 동작해 Shotcut/frei0r 결과와 크게 달라 보일 수 있다.

@@ -1,0 +1,3 @@
+category,gender,option2,texture_name,pathID,size,preview,label
+outfit,female,천산파,skeleton_17,156,"940,2061",resources/previews/female/skeleton_17_preview.png,천산파 여성 의상 skeleton_17
+outfit,male,천산파,skeleton_17,157,"940,2061",resources/previews/male/skeleton_17_preview.png,천산파 남성 의상 skeleton_17
