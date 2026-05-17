@@ -19,7 +19,7 @@
       "name": "UI Tweek 모드",
       "author": "HexX",
       "description": "매니페스트(manifest) 기반의 런타임 에셋 패치 팩 및 런타임 디스플레이 트윅을 위한 별도의 BepInEx IL2CPP 플러그인입니다. 업스케일 어셋 팩에 대비한 모드입니다.",
-      "version": "1.0.0",
+      "version": "0.1.17",
       "downloadPath": "mods/packages/UI_Tweek___/1.0.0/hexx-resource-patch-kit0.1.17.zip",
       "updatePolicy": {
         "mode": "replace-confirm",
