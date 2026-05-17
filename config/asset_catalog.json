@@ -1,22 +1,63 @@
 {
+  "schemaVersion": 2,
   "items": [
     {
-      "id": "female_clothing_skeleton_17_0",
-      "gender": "female",
-      "type": "outfit",
-      "label": "천산파 여성 의상 원본",
-      "textureName": "skeleton_17",
-      "pathId": 167,
-      "preview": "resources/previews/female/skeleton_17_preview.png"
+      "id": "UI_background_111",
+      "gender": "background",
+      "type": "UI",
+      "label": "UI 메인배경",
+      "textureName": "登录界面",
+      "pathId": 111,
+      "category": "UI",
+      "option1": "background",
+      "option1Label": "메인배경",
+      "option2": "",
+      "displayLabel": "UI 메인배경",
+      "preview": "resources/previews/UI/UI_background_111_preview.png",
+      "size": [
+        1920,
+        1080
+      ],
+      "previewUrl": "hexx-resource://preview/resources/previews/UI/UI_background_111_preview.png"
     },
     {
-      "id": "male_clothing_skeleton_17_0",
-      "gender": "male",
-      "type": "outfit",
-      "label": "천산파 남성 의상 원본",
+      "id": "UI_title_611",
+      "gender": "title",
+      "type": "UI",
+      "label": "UI 제목",
+      "textureName": "sactx-0-2048x2048-DXT5-TitleUIAtlas-192071c7",
+      "pathId": 611,
+      "category": "UI",
+      "option1": "title",
+      "option1Label": "제목",
+      "option2": "",
+      "displayLabel": "UI 제목",
+      "preview": "resources/previews/UI/UI_title_611_preview.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "previewUrl": "hexx-resource://preview/resources/previews/UI/UI_title_611_preview.png"
+    },
+    {
+      "id": "Outfit_female_천산파_skeleton_17_156",
+      "gender": "female",
+      "type": "Outfit",
+      "label": "의상 여성 천산파",
       "textureName": "skeleton_17",
-      "pathId": 157,
-      "preview": "resources/previews/male/skeleton_17_preview.png"
+      "pathId": 156,
+      "category": "Outfit",
+      "option1": "female",
+      "option1Label": "여성",
+      "option2": "천산파",
+      "displayLabel": "의상 여성 천산파",
+      "preview": "resources/previews/Outfit/Outfit_female_천산파_skeleton_17_156_preview.png",
+      "size": [
+        940,
+        2061
+      ],
+      "previewUrl": "hexx-resource://preview/resources/previews/Outfit/Outfit_female_%EC%B2%9C%EC%82%B0%ED%8C%8C_skeleton_17_156_preview.png"
     }
-  ]
+  ],
+  "updatedAt": "2026-05-17T13:02:56.167Z"
 }

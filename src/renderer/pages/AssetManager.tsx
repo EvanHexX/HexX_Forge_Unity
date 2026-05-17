@@ -178,7 +178,9 @@ type OnlineAssetPackCatalogItem = {
     version: string;
     downloadPath: string;
     thumbnailPath?: string;
+    previewPath?: string;
     thumbnailUrl?: string;
+    previewUrl?: string;
     installed?: boolean;
     installedVersion?: string;
     updateAvailable?: boolean;
@@ -187,6 +189,7 @@ type OnlineAssetPackCatalogItem = {
 type AssetPackDistributionCatalogItem = OnlineAssetPackCatalogItem & {
     zipPath: string;
     thumbnailFilePath?: string;
+    previewFilePath?: string;
     broken?: boolean;
     brokenReason?: string;
     missingFiles?: string[];
@@ -243,6 +246,14 @@ type MetadataCatalogData = {
 };
 
 type MetadataSortKey = 'id' | 'display';
+
+type CatalogMetadataOption = {
+    value: string;
+    catalogKey: string;
+    rowId: string;
+    label: string;
+    item: AssetCatalogItem;
+};
 
 const CUSTOM_PACK_VALUE = '__custom__';
 const FONT_TARGET_IDS = Array.from({ length: 13 }, (_, index) => 2418 + index);
@@ -1430,6 +1441,7 @@ export default function AssetManager() {
                     setMessage(`어셋팩을 등록했습니다: ${packName}`);
                     showNotification(`어셋팩을 등록했습니다: ${packName}`, 'success');
                 }}
+                onPreviewClick={(title, imageUrl, caption) => setPreviewDialog({ title, imageUrl, caption })}
             />
 
             <AssetPackDistributionDialog
@@ -1850,7 +1862,7 @@ function DeveloperToolsDialog({
                     <Paper sx={{ p: 1.5, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
                         <Typography sx={{ color: 'var(--text-color)', fontWeight: 800 }}>어셋팩 배포</Typography>
                         <Typography sx={{ color: 'var(--text-color-light)', fontSize: 13, mt: 0.5 }}>
-                            asset-packs/index.json과 packages, thumbnails 폴더를 생성하거나 갱신합니다.
+                            asset-packs/index.json과 packages, thumbnails, previews 폴더를 생성하거나 갱신합니다.
                         </Typography>
                         <Button variant="outlined" onClick={onOpenAssetPackDistribution} sx={{ ...outlinedButtonSx, mt: 1 }}>
                             열기
@@ -1869,12 +1881,14 @@ function AddAssetPackDialog({
     open,
     onClose,
     onImportLocal,
-    onImported
+    onImported,
+    onPreviewClick
 }: {
     open: boolean;
     onClose: () => void;
     onImportLocal: () => Promise<void>;
     onImported: (packs: AssetPack[], packName: string) => void;
+    onPreviewClick: (title: string, imageUrl: string, caption?: string) => void;
 }) {
     const [activeTab, setActiveTab] = useState<'online' | 'local'>('online');
     const [onlinePacks, setOnlinePacks] = useState<OnlineAssetPackCatalogItem[]>([]);
@@ -1986,7 +2000,12 @@ function AddAssetPackDialog({
                                                 }}
                                             >
                                                 {item.thumbnailUrl ? (
-                                                    <Box component="img" src={item.thumbnailUrl} sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                                                    <Box
+                                                        component="img"
+                                                        src={item.thumbnailUrl}
+                                                        onClick={() => onPreviewClick(item.name, item.previewUrl || item.thumbnailUrl || '', item.description)}
+                                                        sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', cursor: item.previewUrl || item.thumbnailUrl ? 'zoom-in' : 'default' }}
+                                                    />
                                                 ) : (
                                                     <Typography sx={{ color: 'var(--text-color-light)', fontSize: 11 }}>No image</Typography>
                                                 )}
@@ -2069,70 +2088,112 @@ function parseSizeTuple(value: string): SizeTuple | undefined {
 function metadataRowsToCatalogItems(metadataCatalogs: MetadataCatalogData[]): AssetCatalogItem[] {
     return metadataCatalogs.flatMap((catalog) => {
         if (catalog.key === 'texture-data') {
-            return catalog.rows.map((row): AssetCatalogItem | null => {
-                const values = row.values;
-                const pathId = Number(values.pathID);
-                if (!Number.isFinite(pathId)) return null;
-
-                const category = values.category || 'Outfit';
-                const option1 = values.gender || '';
-                const option2 = values.type || '';
-                const textureName = values.texture_name || '';
-                const displayLabel = [toKoreanCategory(category), toTargetGroupLabel(option1), option2 || textureName]
-                    .filter(Boolean)
-                    .join(' ');
-
-                return {
-                    id: `metadata-data-${pathId}`,
-                    gender: option1,
-                    type: category,
-                    label: displayLabel,
-                    textureName,
-                    pathId,
-                    category,
-                    option1,
-                    option1Label: toTargetGroupLabel(option1),
-                    option2,
-                    displayLabel,
-                    previewUrl: '',
-                    size: parseSizeTuple(values.size || '')
-                };
-            }).filter((item): item is AssetCatalogItem => item !== null);
+            return catalog.rows.map((row) => catalogItemFromMetadataRow(catalog, row)).filter((item): item is AssetCatalogItem => item !== null);
         }
 
         if (catalog.key === 'ui-textures') {
-            return catalog.rows.map((row): AssetCatalogItem | null => {
-                const values = row.values;
-                const pathId = Number(values.pathID);
-                const width = Number(values.width);
-                const height = Number(values.height);
-                if (!Number.isFinite(pathId)) return null;
-
-                const category = values.category || 'UI';
-                const option1 = values.group || '';
-                const option1Label = values.display_name || toTargetGroupLabel(option1);
-                const displayLabel = [toKoreanCategory(category), option1Label].filter(Boolean).join(' ');
-
-                return {
-                    id: `metadata-ui-${pathId}`,
-                    gender: option1,
-                    type: category,
-                    label: displayLabel,
-                    textureName: values.texture_name || '',
-                    pathId,
-                    category,
-                    option1,
-                    option1Label,
-                    option2: '',
-                    displayLabel,
-                    previewUrl: '',
-                    size: Number.isFinite(width) && Number.isFinite(height) ? [width, height] : undefined
-                };
-            }).filter((item): item is AssetCatalogItem => item !== null);
+            return catalog.rows.map((row) => catalogItemFromMetadataRow(catalog, row)).filter((item): item is AssetCatalogItem => item !== null);
         }
 
         return [];
     });
+}
+
+function makeCatalogIdFromParts(...parts: Array<string | number | undefined>): string {
+    const id = parts
+        .map((part) => String(part || '').trim())
+        .filter(Boolean)
+        .join('_')
+        .replace(/[^a-zA-Z0-9가-힣_.-]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+
+    return id || `catalog_${Date.now()}`;
+}
+
+function catalogItemFromMetadataRow(catalog: MetadataCatalogData, row: MetadataCatalogRow): AssetCatalogItem | null {
+    const values = row.values;
+    const pathId = Number(values.pathID);
+    if (!Number.isFinite(pathId)) return null;
+
+    if (catalog.key === 'texture-data') {
+        const category = values.category || 'Outfit';
+        const option1 = values.gender || '';
+        const option2 = values.type || '';
+        const textureName = values.texture_name || '';
+        const displayLabel = [toKoreanCategory(category), toTargetGroupLabel(option1), option2 || textureName]
+            .filter(Boolean)
+            .join(' ');
+
+        return {
+            id: makeCatalogIdFromParts(category, option1, option2, textureName, pathId),
+            gender: option1,
+            type: category,
+            label: displayLabel,
+            textureName,
+            pathId,
+            category,
+            option1,
+            option1Label: toTargetGroupLabel(option1),
+            option2,
+            displayLabel,
+            previewUrl: '',
+            size: parseSizeTuple(values.size || '')
+        };
+    }
+
+    if (catalog.key === 'ui-textures') {
+        const width = Number(values.width);
+        const height = Number(values.height);
+        const category = values.category || 'UI';
+        const option1 = values.group || '';
+        const option1Label = values.display_name || toTargetGroupLabel(option1);
+        const textureName = values.texture_name || '';
+        const displayLabel = [toKoreanCategory(category), option1Label].filter(Boolean).join(' ');
+
+        return {
+            id: makeCatalogIdFromParts(category, option1, textureName, pathId),
+            gender: option1,
+            type: category,
+            label: displayLabel,
+            textureName,
+            pathId,
+            category,
+            option1,
+            option1Label,
+            option2: '',
+            displayLabel,
+            previewUrl: '',
+            size: Number.isFinite(width) && Number.isFinite(height) ? [width, height] : undefined
+        };
+    }
+
+    const width = Number(values.width);
+    const height = Number(values.height);
+    const category = values.category || catalog.key;
+    const option1 = values.group || values.gender || values.option1 || '';
+    const option2 = values.type || values.option2 || '';
+    const option1Label = values.display_name || values.option1Label || toTargetGroupLabel(option1);
+    const textureName = values.texture_name || values.textureName || '';
+    const displayLabel = [toKoreanCategory(category), option1Label, option2 || textureName]
+        .filter(Boolean)
+        .join(' ');
+
+    return {
+        id: makeCatalogIdFromParts(category, option1, option2, textureName, pathId),
+        gender: option1,
+        type: category,
+        label: displayLabel,
+        textureName,
+        pathId,
+        category,
+        option1,
+        option1Label,
+        option2,
+        displayLabel,
+        previewUrl: '',
+        size: parseSizeTuple(values.size || '') ||
+            (Number.isFinite(width) && Number.isFinite(height) ? [width, height] : undefined)
+    };
 }
 
 function buildDistributionCatalogItems(assetCatalogItems: AssetCatalogItem[], metadataCatalogs: MetadataCatalogData[]): AssetCatalogItem[] {
@@ -2156,6 +2217,36 @@ function buildDistributionCatalogItems(assetCatalogItems: AssetCatalogItem[], me
     return [...itemsByKey.values()].sort((a, b) => formatCatalogItemLabel(a).localeCompare(formatCatalogItemLabel(b), 'ko-KR', { numeric: true }));
 }
 
+function findDistributionCatalogItemForTarget(
+    catalogItems: AssetCatalogItem[],
+    target: {
+        catalogId?: string;
+        category?: string;
+        option1?: string;
+        gender?: string;
+        option2?: string;
+        textureName?: string;
+        pathId?: number;
+    }
+): AssetCatalogItem | undefined {
+    const exact = catalogItems.find((item) => item.id === target.catalogId);
+    if (exact) return exact;
+
+    const targetCategory = String(target.category || '').toLowerCase();
+    const targetOption1 = String(target.option1 || target.gender || '').toLowerCase();
+    const targetOption2 = String(target.option2 || '').toLowerCase();
+    const targetTextureName = String(target.textureName || '');
+    const targetPathId = Number(target.pathId);
+
+    return catalogItems.find((item) => (
+        getCatalogCategory(item).toLowerCase() === targetCategory &&
+        getCatalogOption1(item).toLowerCase() === targetOption1 &&
+        getCatalogOption2(item).toLowerCase() === targetOption2 &&
+        String(item.textureName || '') === targetTextureName &&
+        Number(item.pathId) === targetPathId
+    ));
+}
+
 function AssetPackDistributionDialog({
     open,
     onClose,
@@ -2163,7 +2254,7 @@ function AssetPackDistributionDialog({
 }: {
     open: boolean;
     onClose: () => void;
-    onCreated: (result: { item: OnlineAssetPackCatalogItem; indexPath: string; zipPath: string; thumbnailPath?: string }) => void;
+    onCreated: (result: { item: OnlineAssetPackCatalogItem; indexPath: string; zipPath: string; thumbnailPath?: string; previewPath?: string }) => void;
 }) {
     type DistributionTargetRow = {
         rowId: string;
@@ -2191,6 +2282,7 @@ function AssetPackDistributionDialog({
     const [version, setVersion] = useState('1.0.0');
     const [zipPath, setZipPath] = useState('');
     const [thumbnailPath, setThumbnailPath] = useState('');
+    const [packPreviewPath, setPackPreviewPath] = useState('');
     const [distributionItems, setDistributionItems] = useState<AssetPackDistributionCatalogItem[]>([]);
     const [selectedDistributionId, setSelectedDistributionId] = useState('');
     const [catalogItems, setCatalogItems] = useState<AssetCatalogItem[]>([]);
@@ -2253,25 +2345,29 @@ function AssetPackDistributionDialog({
         setDescription(item.description || '');
         setVersion(item.version || '1.0.0');
         setThumbnailPath(item.thumbnailFilePath || '');
+        setPackPreviewPath(item.previewFilePath || '');
         setZipPath('');
-        setTargetRows((item.pack?.targets || []).map((target, index) => ({
-            rowId: `existing_${item.id}_${index}_${target.catalogId}`,
-            pngPath: '',
-            pngUrl: '',
-            fileName: target.png.split('/').pop() || `target_${index + 1}.png`,
-            existingZipPath: item.zipPath,
-            existingPng: target.png,
-            existingPreview: target.preview,
-            size: target.size,
-            catalogId: target.catalogId,
-            displayLabel: target.displayLabel || '',
-            category: target.category || '',
-            option1: target.option1 || target.gender || '',
-            option1Label: target.option1Label || '',
-            option2: target.option2 || '',
-            textureName: target.textureName || '',
-            pathId: String(target.pathId || '')
-        })));
+        setTargetRows((item.pack?.targets || []).map((target, index) => {
+            const catalogItem = findDistributionCatalogItemForTarget(catalogItems, target);
+            return {
+                rowId: `existing_${item.id}_${index}_${target.catalogId}`,
+                pngPath: '',
+                pngUrl: '',
+                fileName: target.png.split('/').pop() || `target_${index + 1}.png`,
+                existingZipPath: item.zipPath,
+                existingPng: target.png,
+                existingPreview: target.preview,
+                size: target.size,
+                catalogId: catalogItem?.id || '',
+                displayLabel: target.displayLabel || catalogItem?.displayLabel || '',
+                category: target.category || catalogItem?.category || '',
+                option1: target.option1 || target.gender || catalogItem?.option1 || '',
+                option1Label: target.option1Label || catalogItem?.option1Label || '',
+                option2: target.option2 || catalogItem?.option2 || '',
+                textureName: target.textureName || catalogItem?.textureName || '',
+                pathId: String(target.pathId || catalogItem?.pathId || '')
+            };
+        }));
 
         if (item.broken) {
             setError(`${item.name} 배포 항목이 깨져 있습니다. ${item.brokenReason || ''}`.trim());
@@ -2384,6 +2480,12 @@ function AssetPackDistributionDialog({
         setThumbnailPath(selected);
     };
 
+    const handleSelectPackPreview = async () => {
+        const selected = await window.electronAPI.selectAssetPackThumbnail();
+        if (!selected) return;
+        setPackPreviewPath(selected);
+    };
+
     const handleCreate = async () => {
         setSaving(true);
         setError('');
@@ -2409,6 +2511,7 @@ function AssetPackDistributionDialog({
                 version,
                 zipPath: zipPath || undefined,
                 thumbnailPath,
+                previewPath: packPreviewPath,
                 gameIds: ['long-yin-li-zhi-zhuan'],
                 targets: targetRows.map((row) => ({
                     catalogId: row.catalogId,
@@ -2431,7 +2534,8 @@ function AssetPackDistributionDialog({
             setResultText([
                 `index: ${result.indexPath}`,
                 `zip: ${result.zipPath}`,
-                result.thumbnailPath ? `thumbnail: ${result.thumbnailPath}` : ''
+                result.thumbnailPath ? `thumbnail: ${result.thumbnailPath}` : '',
+                result.previewPath ? `preview: ${result.previewPath}` : ''
             ].filter(Boolean).join('\n'));
             setSelectedDistributionId(result.item.id);
             setDistributionItems(await window.electronAPI.getAssetPackDistributionCatalog());
@@ -2448,7 +2552,7 @@ function AssetPackDistributionDialog({
             <DialogTitle sx={dialogTitleSx}>어셋팩 배포용 파일 생성</DialogTitle>
             <DialogContent sx={dialogContentSx}>
                 <Typography sx={{ color: 'var(--text-color-light)', mb: 2, fontSize: 13 }}>
-                    PNG를 여러 개 추가한 뒤 각 PNG마다 적용대상을 지정하면 pack.json과 배포 ZIP이 함께 생성됩니다. thumbnail PNG는 최대 420x280으로 축소됩니다.
+                    PNG를 여러 개 추가한 뒤 각 PNG마다 적용대상을 지정하면 pack.json과 배포 ZIP이 함께 생성됩니다. thumbnail은 최대 420x280, 확대 preview는 최대 1920x1080으로 별도 생성됩니다.
                 </Typography>
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
                 <Stack spacing={1.5}>
@@ -2520,10 +2624,18 @@ function AssetPackDistributionDialog({
                     </Stack>
                     <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
                         <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={handleSelectThumbnail} sx={outlinedButtonSx}>
-                            미리보기 PNG 선택
+                            thumbnail PNG 선택
                         </Button>
                         <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12, wordBreak: 'break-all' }}>
                             {thumbnailPath || '선택된 PNG 없음'}
+                        </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
+                        <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={handleSelectPackPreview} sx={outlinedButtonSx}>
+                            확대 preview PNG 선택
+                        </Button>
+                        <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12, wordBreak: 'break-all' }}>
+                            {packPreviewPath || '선택된 PNG 없음'}
                         </Typography>
                     </Stack>
                     {targetRows.length > 0 && (
@@ -2531,18 +2643,37 @@ function AssetPackDistributionDialog({
                             {targetRows.map((row, index) => (
                                 <Paper key={row.rowId} sx={{ p: 1.5, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
                                     <Stack direction="row" spacing={1.25} sx={{ alignItems: 'flex-start' }}>
-                                        <Box
-                                            component="img"
-                                            src={row.pngUrl}
-                                            sx={{
-                                                width: 104,
-                                                height: 72,
-                                                objectFit: 'contain',
-                                                border: '1px solid var(--border-color)',
-                                                background: 'var(--sidebar-bg-color)',
-                                                flexShrink: 0
-                                            }}
-                                        />
+                                        {row.pngUrl ? (
+                                            <Box
+                                                component="img"
+                                                src={row.pngUrl}
+                                                sx={{
+                                                    width: 104,
+                                                    height: 72,
+                                                    objectFit: 'contain',
+                                                    border: '1px solid var(--border-color)',
+                                                    background: 'var(--sidebar-bg-color)',
+                                                    flexShrink: 0
+                                                }}
+                                            />
+                                        ) : (
+                                            <Box
+                                                sx={{
+                                                    width: 104,
+                                                    height: 72,
+                                                    border: '1px solid var(--border-color)',
+                                                    background: 'var(--sidebar-bg-color)',
+                                                    color: 'var(--text-color-light)',
+                                                    fontSize: 11,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    flexShrink: 0
+                                                }}
+                                            >
+                                                기존 ZIP
+                                            </Box>
+                                        )}
                                         <Box sx={{ flex: 1, minWidth: 0 }}>
                                             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
                                                 <Typography sx={{ color: 'var(--text-color)', fontWeight: 800 }}>
@@ -2682,6 +2813,13 @@ function createCatalogEditorRow(): CatalogEditorRow {
     };
 }
 
+function createCatalogEditorRowFromMetadata(item: AssetCatalogItem): CatalogEditorRow {
+    return {
+        ...toCatalogEditorRow(item),
+        rowId: `catalog_from_metadata_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    };
+}
+
 function validateEditorRows(rows: CatalogEditorRow[]): string {
     const seen = new Set<string>();
 
@@ -2781,9 +2919,44 @@ function CatalogEditorDialog({
     const [metadataCatalogs, setMetadataCatalogs] = useState<MetadataCatalogData[]>([]);
     const [activeEditorTab, setActiveEditorTab] = useState('asset-catalog');
     const [metadataSort, setMetadataSort] = useState<Record<string, MetadataSortKey>>({});
+    const [selectedCatalogSourceKey, setSelectedCatalogSourceKey] = useState('texture-data');
+    const [selectedMetadataRowValue, setSelectedMetadataRowValue] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [editorMessage, setEditorMessage] = useState('');
+
+    const catalogMetadataOptions = useMemo(() => {
+        const optionsByCatalog = new Map<string, CatalogMetadataOption[]>();
+
+        for (const catalog of metadataCatalogs) {
+            const options = catalog.rows
+                .map((row): CatalogMetadataOption | null => {
+                    const item = catalogItemFromMetadataRow(catalog, row);
+                    if (!item) return null;
+
+                    const value = `${catalog.key}::${row.rowId || makeCatalogIdFromParts(item.category, item.option1, item.option2, item.textureName, item.pathId)}`;
+                    const label = [
+                        formatCatalogItemLabel(item),
+                        `pathID ${item.pathId}`,
+                        item.textureName
+                    ].filter(Boolean).join(' · ');
+
+                    return {
+                        value,
+                        catalogKey: catalog.key,
+                        rowId: row.rowId || '',
+                        label,
+                        item
+                    };
+                })
+                .filter((option): option is CatalogMetadataOption => option !== null)
+                .sort((a, b) => a.label.localeCompare(b.label, 'ko-KR', { numeric: true }));
+
+            optionsByCatalog.set(catalog.key, options);
+        }
+
+        return optionsByCatalog;
+    }, [metadataCatalogs]);
 
     const loadRows = async () => {
         setLoading(true);
@@ -2797,6 +2970,11 @@ function CatalogEditorDialog({
             ]);
             setRows((result.items || []).map((item: AssetCatalogItem) => toCatalogEditorRow(item)));
             setMetadataCatalogs(metadataResult);
+            setSelectedCatalogSourceKey((prev) => metadataResult.some((catalog) => catalog.key === prev)
+                ? prev
+                : metadataResult[0]?.key || ''
+            );
+            setSelectedMetadataRowValue('');
         } catch (err) {
             setError(err instanceof Error ? err.message : 'asset_catalog.json을 불러오지 못했습니다.');
         } finally {
@@ -2850,6 +3028,25 @@ function CatalogEditorDialog({
                 ? { ...catalog, rows: catalog.rows.filter((row) => row.rowId !== rowId) }
                 : catalog
         )));
+    };
+
+    const handleCatalogSourceChange = (catalogKey: string) => {
+        setSelectedCatalogSourceKey(catalogKey);
+        setSelectedMetadataRowValue('');
+    };
+
+    const handleAddCatalogRowFromMetadata = () => {
+        const options = catalogMetadataOptions.get(selectedCatalogSourceKey) || [];
+        const option = options.find((item) => item.value === selectedMetadataRowValue);
+        if (!option) {
+            setError('asset_catalog.json에 추가할 metadata row를 선택하세요.');
+            return;
+        }
+
+        setError('');
+        setRows((prev) => [...prev, createCatalogEditorRowFromMetadata(option.item)]);
+        setSelectedMetadataRowValue('');
+        setEditorMessage(`${option.label} 항목을 asset_catalog.json 편집 목록에 추가했습니다.`);
     };
 
     const handleSaveMetadataCatalog = async (catalogKey: string) => {
@@ -2933,12 +3130,55 @@ function CatalogEditorDialog({
             </Tabs>
             <DialogContent sx={dialogContentSx}>
                 <Alert severity="info" sx={{ mb: 2 }}>
-                    asset_catalog.json은 앱 표시/팩 연결 기준이고, metadata TSV는 UnityPy 실제 patch 기준입니다. 새 asset 종류가 생기면 TSV tab을 별도 catalog로 추가해 서로 섞지 않습니다.
+                    asset_catalog.json은 앱 표시/팩 연결 기준이고, metadata TSV는 UnityPy 실제 patch 기준입니다. catalog 항목은 먼저 metadata row를 선택해 만들고, category/option1/option2/textureName/pathId는 metadata 값을 그대로 사용합니다.
                 </Alert>
                 {editorMessage && <Alert severity="success" sx={{ mb: 2 }}>{editorMessage}</Alert>}
                 {error && <Typography sx={{ color: 'var(--accent-color)', mb: 2 }}>{error}</Typography>}
                 {activeEditorTab === 'asset-catalog' && (
                     <>
+                <Paper sx={{ p: 1.5, mb: 1.5, background: 'var(--bg-color)', border: '1px solid var(--border-color)' }}>
+                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
+                        <FormControl size="small" sx={{ minWidth: 220 }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>metadata source</InputLabel>
+                            <Select
+                                value={selectedCatalogSourceKey}
+                                label="metadata source"
+                                onChange={(event) => handleCatalogSourceChange(String(event.target.value || ''))}
+                                sx={selectSx}
+                            >
+                                {metadataCatalogs.map((catalog) => (
+                                    <MenuItem key={catalog.key} value={catalog.key}>
+                                        {catalog.label}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                        <FormControl size="small" sx={{ minWidth: 420, flex: 1 }}>
+                            <InputLabel sx={{ color: 'var(--text-color-light)' }}>metadata row</InputLabel>
+                            <Select
+                                value={selectedMetadataRowValue}
+                                label="metadata row"
+                                onChange={(event) => setSelectedMetadataRowValue(String(event.target.value || ''))}
+                                sx={selectSx}
+                            >
+                                <MenuItem value="">선택 안함</MenuItem>
+                                {(catalogMetadataOptions.get(selectedCatalogSourceKey) || []).map((option) => (
+                                    <MenuItem key={option.value} value={option.value}>
+                                        {option.label}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                        <Button
+                            variant="outlined"
+                            onClick={handleAddCatalogRowFromMetadata}
+                            disabled={!selectedMetadataRowValue}
+                            sx={outlinedButtonSx}
+                        >
+                            metadata에서 항목 추가
+                        </Button>
+                    </Stack>
+                </Paper>
                 <Stack spacing={1}>
                     {rows.map((row, index) => (
                         <Accordion key={row.rowId} disableGutters slotProps={accordionSlotProps} sx={editorAccordionSx}>
@@ -2955,13 +3195,13 @@ function CatalogEditorDialog({
                             <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
                                 <TextField size="small" label="id" value={row.id} onChange={(e) => updateRow(index, { id: e.target.value })} sx={editorFieldSx(170)} />
                                 <TextField size="small" label="표시명" value={row.displayLabel || ''} onChange={(e) => updateRow(index, { displayLabel: e.target.value, label: e.target.value })} sx={editorFieldSx(170)} />
-                                <TextField size="small" label="종류" value={row.category || ''} onChange={(e) => updateRow(index, { category: e.target.value, type: e.target.value })} sx={editorFieldSx(100)} />
-                                <TextField size="small" label="대상 구분" value={row.option1 || ''} onChange={(e) => updateRow(index, { option1: e.target.value, gender: e.target.value })} sx={editorFieldSx(120)} />
+                                <TextField size="small" label="종류" value={row.category || ''} slotProps={{ input: { readOnly: true } }} sx={editorFieldSx(100)} />
+                                <TextField size="small" label="대상 구분" value={row.option1 || ''} slotProps={{ input: { readOnly: true } }} sx={editorFieldSx(120)} />
                                 <TextField size="small" label="대상 라벨" value={row.option1Label || ''} onChange={(e) => updateRow(index, { option1Label: e.target.value })} sx={editorFieldSx(120)} />
-                                <TextField size="small" label="option2" value={row.option2 || ''} onChange={(e) => updateRow(index, { option2: e.target.value })} sx={editorFieldSx(140)} />
-                                <TextField size="small" label="textureName" value={row.textureName || ''} onChange={(e) => updateRow(index, { textureName: e.target.value })} sx={editorFieldSx(140)} />
-                                <TextField size="small" label="pathId" value={row.pathId} onChange={(e) => updateRow(index, { pathId: e.target.value })} sx={editorFieldSx(90)} />
-                                <TextField size="small" label="size" value={row.sizeText} onChange={(e) => updateRow(index, { sizeText: e.target.value })} sx={editorFieldSx(110)} />
+                                <TextField size="small" label="option2" value={row.option2 || ''} slotProps={{ input: { readOnly: true } }} sx={editorFieldSx(140)} />
+                                <TextField size="small" label="textureName" value={row.textureName || ''} slotProps={{ input: { readOnly: true } }} sx={editorFieldSx(140)} />
+                                <TextField size="small" label="pathId" value={row.pathId} slotProps={{ input: { readOnly: true } }} sx={editorFieldSx(90)} />
+                                <TextField size="small" label="size" value={row.sizeText} slotProps={{ input: { readOnly: true } }} sx={editorFieldSx(110)} />
                                 <Chip
                                     label={getPatchMetadataLabel(row.category || row.type || '')}
                                     size="small"
@@ -2992,9 +3232,6 @@ function CatalogEditorDialog({
                         </Accordion>
                     ))}
                 </Stack>
-                <Button variant="outlined" onClick={() => setRows((prev) => [...prev, createCatalogEditorRow()])} sx={{ ...outlinedButtonSx, mt: 2 }}>
-                    항목 추가
-                </Button>
                 <Button variant="outlined" onClick={onExportDistribution} sx={{ ...outlinedButtonSx, mt: 2, ml: 1 }}>
                     배포용 catalog export
                 </Button>

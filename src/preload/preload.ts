@@ -71,6 +71,7 @@ type OnlineAssetPackCatalogItem = {
     version: string;
     downloadPath: string;
     thumbnailPath?: string;
+    previewPath?: string;
     sha256?: string;
     gameIds?: string[];
     installedPackId?: string;
@@ -78,6 +79,7 @@ type OnlineAssetPackCatalogItem = {
     installed?: boolean;
     updateAvailable?: boolean;
     thumbnailUrl?: string;
+    previewUrl?: string;
 };
 
 type AssetPackDistributionInput = {
@@ -88,6 +90,7 @@ type AssetPackDistributionInput = {
     version: string;
     zipPath?: string;
     thumbnailPath?: string;
+    previewPath?: string;
     gameIds?: string[];
     targets?: Array<{
         catalogId: string;
@@ -111,6 +114,7 @@ type AssetPackDistributionInput = {
 type AssetPackDistributionCatalogItem = OnlineAssetPackCatalogItem & {
     zipPath: string;
     thumbnailFilePath?: string;
+    previewFilePath?: string;
     broken?: boolean;
     brokenReason?: string;
     missingFiles?: string[];

@@ -9,7 +9,8 @@
       "version": "1.0.0",
       "downloadPath": "asset-packs/packages/hexx-starfall-from-ninth-heaven/1.0.0/hexx-starfall-from-ninth-heaven.zip",
       "thumbnailPath": "asset-packs/thumbnails/hexx-starfall-from-ninth-heaven.png",
-      "sha256": "290ed58a5723538cdc606d4507de275cd8b2be06328ac2a1980cb94d3f1dc2b0",
+      "previewPath": "asset-packs/previews/hexx-starfall-from-ninth-heaven.png",
+      "sha256": "26b988bc13c86f0e19bcbb81784f7e7eb1f3412b7afa1a1adcdac410f0c667ab",
       "gameIds": [
         "long-yin-li-zhi-zhuan"
       ]

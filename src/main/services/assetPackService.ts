@@ -17,6 +17,7 @@ const CATALOG_BASE_URL =
 const CATALOG_INDEX_URL = `${CATALOG_BASE_URL}/asset-packs/index.json`;
 const DISTRIBUTION_ROOT = path.join(process.cwd(), 'asset-packs');
 const THUMBNAIL_MAX_SIZE = { width: 420, height: 280 };
+const PREVIEW_MAX_SIZE = { width: 1920, height: 1080 };
 
 type SizeTuple = [number, number];
 
@@ -78,6 +79,7 @@ export type OnlineAssetPackCatalogItem = {
     version: string;
     downloadPath: string;
     thumbnailPath?: string;
+    previewPath?: string;
     sha256?: string;
     gameIds?: string[];
     installedPackId?: string;
@@ -85,6 +87,7 @@ export type OnlineAssetPackCatalogItem = {
     installed?: boolean;
     updateAvailable?: boolean;
     thumbnailUrl?: string;
+    previewUrl?: string;
 };
 
 type OnlineAssetPackCatalogFile = {
@@ -100,6 +103,7 @@ export type AssetPackDistributionInput = {
     version: string;
     zipPath?: string;
     thumbnailPath?: string;
+    previewPath?: string;
     gameIds?: string[];
     targets?: AssetPackDistributionTargetInput[];
 };
@@ -127,11 +131,13 @@ export type AssetPackDistributionResult = {
     indexPath: string;
     zipPath: string;
     thumbnailPath?: string;
+    previewPath?: string;
 };
 
 export type AssetPackDistributionCatalogItem = OnlineAssetPackCatalogItem & {
     zipPath: string;
     thumbnailFilePath?: string;
+    previewFilePath?: string;
     pack?: AssetPackRaw;
     broken?: boolean;
     brokenReason?: string;
@@ -216,8 +222,9 @@ function cleanupDistributionTempDirs(rootDir = DISTRIBUTION_ROOT): void {
 function cleanupEmptyDistributionDirs(): void {
     const packagesRoot = path.join(DISTRIBUTION_ROOT, 'packages');
     const thumbnailsRoot = path.join(DISTRIBUTION_ROOT, 'thumbnails');
+    const previewsRoot = path.join(DISTRIBUTION_ROOT, 'previews');
 
-    for (const dirPath of [packagesRoot, thumbnailsRoot]) {
+    for (const dirPath of [packagesRoot, thumbnailsRoot, previewsRoot]) {
         if (fs.existsSync(dirPath) && fs.readdirSync(dirPath).length === 0) {
             fs.rmSync(dirPath, { recursive: true, force: true });
         }
@@ -354,6 +361,11 @@ function enrichOnlineCatalogItems(items: OnlineAssetPackCatalogItem[]): OnlineAs
                 thumbnailUrl: item.thumbnailPath
                     ? `${CATALOG_BASE_URL}/${item.thumbnailPath.replace(/^\/+/, '')}`
                     : undefined,
+                previewUrl: item.previewPath
+                    ? `${CATALOG_BASE_URL}/${item.previewPath.replace(/^\/+/, '')}`
+                    : item.thumbnailPath
+                        ? `${CATALOG_BASE_URL}/${item.thumbnailPath.replace(/^\/+/, '')}`
+                        : undefined,
                 installedPackId: installedPack?.packId,
                 installedVersion,
                 installed: Boolean(installedPack),
@@ -469,16 +481,16 @@ function writeThumbnail(sourcePath: string, targetPath: string): void {
     fs.writeFileSync(targetPath, resized.toPNG());
 }
 
-function writeThumbnailFromBuffer(buffer: Buffer, targetPath: string): void {
-    const image = nativeImage.createFromBuffer(buffer);
+function writeResizedPng(sourcePath: string, targetPath: string, maxSize: SizeTuple, label: string): void {
+    const image = nativeImage.createFromPath(sourcePath);
     if (image.isEmpty()) {
-        throw new Error('thumbnail PNG를 읽을 수 없습니다.');
+        throw new Error(`${label} PNG를 읽을 수 없습니다.`);
     }
 
     const size = image.getSize();
     const scale = Math.min(
-        THUMBNAIL_MAX_SIZE.width / Math.max(size.width, 1),
-        THUMBNAIL_MAX_SIZE.height / Math.max(size.height, 1),
+        maxSize[0] / Math.max(size.width, 1),
+        maxSize[1] / Math.max(size.height, 1),
         1
     );
     const resized = image.resize({
@@ -488,6 +500,31 @@ function writeThumbnailFromBuffer(buffer: Buffer, targetPath: string): void {
     });
     ensureDir(path.dirname(targetPath));
     fs.writeFileSync(targetPath, resized.toPNG());
+}
+
+function writeResizedPngFromBuffer(buffer: Buffer, targetPath: string, maxSize: SizeTuple, label: string): void {
+    const image = nativeImage.createFromBuffer(buffer);
+    if (image.isEmpty()) {
+        throw new Error(`${label} PNG를 읽을 수 없습니다.`);
+    }
+
+    const size = image.getSize();
+    const scale = Math.min(
+        maxSize[0] / Math.max(size.width, 1),
+        maxSize[1] / Math.max(size.height, 1),
+        1
+    );
+    const resized = image.resize({
+        width: Math.max(1, Math.round(size.width * scale)),
+        height: Math.max(1, Math.round(size.height * scale)),
+        quality: 'best'
+    });
+    ensureDir(path.dirname(targetPath));
+    fs.writeFileSync(targetPath, resized.toPNG());
+}
+
+function writeThumbnailFromBuffer(buffer: Buffer, targetPath: string): void {
+    writeResizedPngFromBuffer(buffer, targetPath, [THUMBNAIL_MAX_SIZE.width, THUMBNAIL_MAX_SIZE.height], 'thumbnail');
 }
 
 function toPosixPath(...segments: string[]): string {
@@ -653,44 +690,50 @@ function validatePackZip(zipPath: string): AssetPackRaw {
     return pack;
 }
 
-function writeThumbnailFromPackZip(zipPath: string, targetPath: string): void {
-    const pack = validatePackZip(zipPath);
-    const firstTarget = pack.targets[0];
-    const sourceEntry = firstTarget?.png || firstTarget?.preview;
-    if (!sourceEntry) {
-        throw new Error('thumbnail 생성에 사용할 pack target이 없습니다.');
-    }
-
-    writeThumbnailFromBuffer(getZipEntryBuffer(zipPath, sourceEntry), targetPath);
-}
-
-function writeDistributionThumbnail(input: AssetPackDistributionInput, tempZipPath: string, targetPath: string): string | undefined {
+function findDistributionRepresentativeSource(input: AssetPackDistributionInput, tempZipPath: string): { type: 'file'; path: string } | { type: 'zip'; zipPath: string; entryName: string } | undefined {
     const firstTarget = input.targets?.[0];
-
-    if (input.thumbnailPath) {
-        if (!fs.existsSync(input.thumbnailPath)) throw new Error('thumbnail PNG 파일을 찾을 수 없습니다.');
-        writeThumbnail(input.thumbnailPath, targetPath);
-        return targetPath;
-    }
 
     if (firstTarget?.previewPath || firstTarget?.pngPath) {
         const sourcePath = firstTarget.previewPath || firstTarget.pngPath;
-        if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error('thumbnail PNG 파일을 찾을 수 없습니다.');
-        writeThumbnail(sourcePath, targetPath);
-        return targetPath;
+        if (sourcePath && fs.existsSync(sourcePath)) return { type: 'file', path: sourcePath };
     }
 
     if (firstTarget?.existingZipPath && firstTarget.existingPng) {
-        writeThumbnailFromBuffer(getZipEntryBuffer(firstTarget.existingZipPath, firstTarget.existingPng), targetPath);
-        return targetPath;
+        return { type: 'zip', zipPath: firstTarget.existingZipPath, entryName: firstTarget.existingPng };
     }
 
     if (fs.existsSync(tempZipPath)) {
-        writeThumbnailFromPackZip(tempZipPath, targetPath);
-        return targetPath;
+        const pack = validatePackZip(tempZipPath);
+        const firstPackTarget = pack.targets[0];
+        const sourceEntry = firstPackTarget?.png || firstPackTarget?.preview;
+        if (sourceEntry) return { type: 'zip', zipPath: tempZipPath, entryName: sourceEntry };
     }
 
     return undefined;
+}
+
+function writeDistributionImage(
+    input: AssetPackDistributionInput,
+    tempZipPath: string,
+    targetPath: string,
+    options: { explicitPath?: string; maxSize: SizeTuple; label: string }
+): string | undefined {
+    if (options.explicitPath) {
+        if (!fs.existsSync(options.explicitPath)) throw new Error(`${options.label} PNG 파일을 찾을 수 없습니다.`);
+        writeResizedPng(options.explicitPath, targetPath, options.maxSize, options.label);
+        return targetPath;
+    }
+
+    const source = findDistributionRepresentativeSource(input, tempZipPath);
+    if (!source) return undefined;
+
+    if (source.type === 'file') {
+        writeResizedPng(source.path, targetPath, options.maxSize, options.label);
+        return targetPath;
+    }
+
+    writeResizedPngFromBuffer(getZipEntryBuffer(source.zipPath, source.entryName), targetPath, options.maxSize, options.label);
+    return targetPath;
 }
 
 export function createAssetPackDistribution(input: AssetPackDistributionInput): AssetPackDistributionResult {
@@ -708,10 +751,13 @@ export function createAssetPackDistribution(input: AssetPackDistributionInput): 
     const packageRootDir = path.join(DISTRIBUTION_ROOT, 'packages', id);
     const packageDir = path.join(packageRootDir, version);
     const thumbnailDir = path.join(DISTRIBUTION_ROOT, 'thumbnails');
+    const previewDir = path.join(DISTRIBUTION_ROOT, 'previews');
     const tempRoot = path.join(DISTRIBUTION_ROOT, 'packages', `__tmp-${id}-${Date.now()}`);
     const tempThumbnailPath = path.join(tempRoot, `${id}.png`);
+    const tempPreviewPath = path.join(tempRoot, `${id}_preview.png`);
     const finalZipPath = path.join(packageDir, `${id}.zip`);
     const finalThumbnailPath = path.join(thumbnailDir, `${id}.png`);
+    const finalPreviewPath = path.join(previewDir, `${id}.png`);
 
     cleanupDistributionTempDirs();
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -728,17 +774,33 @@ export function createAssetPackDistribution(input: AssetPackDistributionInput): 
 
         validatePackZip(tempZipPath);
 
-        const thumbnailPath = writeDistributionThumbnail(input, tempZipPath, tempThumbnailPath);
+        const thumbnailPath = writeDistributionImage(input, tempZipPath, tempThumbnailPath, {
+            explicitPath: input.thumbnailPath,
+            maxSize: [THUMBNAIL_MAX_SIZE.width, THUMBNAIL_MAX_SIZE.height],
+            label: 'thumbnail'
+        });
         const thumbnailCatalogPath = thumbnailPath ? `asset-packs/thumbnails/${id}.png` : undefined;
+        const previewPath = writeDistributionImage(input, tempZipPath, tempPreviewPath, {
+            explicitPath: input.previewPath || input.thumbnailPath,
+            maxSize: [PREVIEW_MAX_SIZE.width, PREVIEW_MAX_SIZE.height],
+            label: 'preview'
+        });
+        const previewCatalogPath = previewPath ? `asset-packs/previews/${id}.png` : undefined;
 
         fs.rmSync(packageRootDir, { recursive: true, force: true });
         ensureDir(packageDir);
         ensureDir(thumbnailDir);
+        ensureDir(previewDir);
         fs.copyFileSync(tempZipPath, finalZipPath);
         if (thumbnailPath) {
             fs.copyFileSync(tempThumbnailPath, finalThumbnailPath);
         } else {
             fs.rmSync(finalThumbnailPath, { force: true });
+        }
+        if (previewPath) {
+            fs.copyFileSync(tempPreviewPath, finalPreviewPath);
+        } else {
+            fs.rmSync(finalPreviewPath, { force: true });
         }
 
         validatePackZip(finalZipPath);
@@ -752,17 +814,22 @@ export function createAssetPackDistribution(input: AssetPackDistributionInput): 
             version,
             downloadPath: `asset-packs/packages/${id}/${version}/${id}.zip`,
             thumbnailPath: thumbnailCatalogPath,
+            previewPath: previewCatalogPath,
             sha256,
             gameIds: input.gameIds?.filter(Boolean)
         };
 
         const resolvedZipPath = resolveDistributionPath(item.downloadPath);
         const resolvedThumbnailPath = resolveDistributionPath(item.thumbnailPath);
+        const resolvedPreviewPath = resolveDistributionPath(item.previewPath);
         if (resolvedZipPath !== finalZipPath || !fs.existsSync(resolvedZipPath)) {
             throw new Error('index.json downloadPath가 생성된 ZIP과 일치하지 않습니다.');
         }
         if (item.thumbnailPath && (!resolvedThumbnailPath || !fs.existsSync(resolvedThumbnailPath))) {
             throw new Error('index.json thumbnailPath가 생성된 thumbnail과 일치하지 않습니다.');
+        }
+        if (item.previewPath && (!resolvedPreviewPath || !fs.existsSync(resolvedPreviewPath))) {
+            throw new Error('index.json previewPath가 생성된 preview와 일치하지 않습니다.');
         }
 
         const indexPath = path.join(DISTRIBUTION_ROOT, 'index.json');
@@ -778,7 +845,8 @@ export function createAssetPackDistribution(input: AssetPackDistributionInput): 
             item,
             indexPath,
             zipPath: finalZipPath,
-            thumbnailPath: thumbnailPath ? finalThumbnailPath : undefined
+            thumbnailPath: thumbnailPath ? finalThumbnailPath : undefined,
+            previewPath: previewPath ? finalPreviewPath : undefined
         };
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -801,12 +869,16 @@ function inspectDistributionItem(item: OnlineAssetPackCatalogItem): {
     const missingFiles: string[] = [];
     const zipPath = resolveDistributionPath(item.downloadPath);
     const thumbnailFilePath = resolveDistributionPath(item.thumbnailPath);
+    const previewFilePath = resolveDistributionPath(item.previewPath);
 
     if (!zipPath || !fs.existsSync(zipPath)) {
         missingFiles.push(item.downloadPath);
     }
     if (item.thumbnailPath && (!thumbnailFilePath || !fs.existsSync(thumbnailFilePath))) {
         missingFiles.push(item.thumbnailPath);
+    }
+    if (item.previewPath && (!previewFilePath || !fs.existsSync(previewFilePath))) {
+        missingFiles.push(item.previewPath);
     }
 
     if (!zipPath || !fs.existsSync(zipPath)) {
@@ -822,7 +894,7 @@ function inspectDistributionItem(item: OnlineAssetPackCatalogItem): {
             pack: validatePackZip(zipPath),
             broken: missingFiles.length > 0,
             brokenReason: missingFiles.length > 0
-                ? 'index.json이 가리키는 thumbnail 파일을 찾을 수 없습니다.'
+                ? 'index.json이 가리키는 preview/thumbnail 파일을 찾을 수 없습니다.'
                 : undefined,
             missingFiles
         };
@@ -841,12 +913,14 @@ export function getAssetPackDistributionCatalog(): AssetPackDistributionCatalogI
     return index.assetPacks.map((item) => {
         const zipPath = resolveDistributionPath(item.downloadPath);
         const thumbnailFilePath = resolveDistributionPath(item.thumbnailPath);
+        const previewFilePath = resolveDistributionPath(item.previewPath);
         const inspection = inspectDistributionItem(item);
 
         return {
             ...item,
             zipPath,
             thumbnailFilePath: thumbnailFilePath && fs.existsSync(thumbnailFilePath) ? thumbnailFilePath : undefined,
+            previewFilePath: previewFilePath && fs.existsSync(previewFilePath) ? previewFilePath : undefined,
             pack: inspection.pack,
             broken: inspection.broken,
             brokenReason: inspection.brokenReason,
@@ -872,6 +946,12 @@ export function deleteAssetPackDistributionItem(id: string): OnlineAssetPackCata
         if (thumbnailPath) fs.rmSync(thumbnailPath, { force: true });
     } else {
         fs.rmSync(path.join(DISTRIBUTION_ROOT, 'thumbnails', `${safeId}.png`), { force: true });
+    }
+    if (existing?.previewPath) {
+        const previewPath = resolveDistributionPath(existing.previewPath);
+        if (previewPath) fs.rmSync(previewPath, { force: true });
+    } else {
+        fs.rmSync(path.join(DISTRIBUTION_ROOT, 'previews', `${safeId}.png`), { force: true });
     }
 
     cleanupDistributionTempDirs();

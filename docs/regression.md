@@ -69,6 +69,8 @@
 - 원인: Electron catalog와 UnityPy metadata가 역할은 분리되어 있지만, 개발자 도구가 한쪽만 편집하게 되어 있었다.
 - 예방: Catalog Editor는 catalog JSON과 metadata TSV를 tab으로 분리해 관리한다. TSV tab은 metadata registry를 기준으로 columns를 렌더링하고, 각 row는 기본 접힘 accordion으로 표시해 100개 이상 행에서도 스캔 가능하게 유지한다.
 - `data.tsv`와 `ui_textures.tsv`는 서로 다른 UnityPy API의 source of truth이므로 한 파일에 섞지 않는다. 신규 asset kind는 별도 TSV/plan kind/registry entry로 추가한다.
+- 추가 증상: `asset_catalog.json` 항목 추가가 특정 metadata 파일만 암묵적으로 사용하거나, 사용자가 `category/option1/option2/textureName/pathId`를 먼저 직접 입력하면 UnityPy metadata와 다른 catalog target이 생길 수 있다.
+- 예방: catalog 항목 추가는 metadata source file과 metadata row를 먼저 선택해 생성한다. `pathId`는 중복 가능하므로 unique key로 단독 사용하지 말고, metadata file key와 stable row id를 함께 사용한다. 실제 patch identity field는 catalog editor에서 읽기 전용으로 유지한다.
 
 ## 2026-05-17 Asset Pack distribution edit
 
@@ -78,6 +80,8 @@
 - 추가 증상: ZIP 생성 실패 뒤 `asset-packs/packages/.../__pack_staging/files/...png` 같은 raw 작업물이 남고, `asset-packs/index.json`은 존재하지 않는 ZIP을 가리킬 수 있었다.
 - 추가 원인: staging을 최종 version 폴더 안에 만들고, 생성 시작 시 기존 `packages/{packId}`를 먼저 삭제해 수정 배포에서 기존 ZIP entry를 재사용하기 어렵거나 실패 산출물이 남을 수 있었다.
 - 예방: 배포 생성은 `packages/__tmp-{packId}-{timestamp}`에서 ZIP과 thumbnail을 완성한 뒤 검증에 성공한 경우에만 최종 ZIP/thumbnail/index를 갱신한다. 성공/실패 후 `__pack_staging`과 `__tmp-*`를 정리하고, 배포 catalog 조회는 missing ZIP/thumbnail을 `깨짐` 상태로 표시해야 한다.
+- 추가 증상: 온라인 어셋팩 목록의 작은 thumbnail을 클릭 확대 preview에도 그대로 사용하면 이미지가 흐릿하게 보인다.
+- 예방: catalog item은 목록용 `thumbnailPath`와 확대용 `previewPath`를 분리한다. 생성 도구는 thumbnail을 최대 `420x280`, 대표 preview를 최대 `1920x1080`으로 별도 생성하고, UI는 클릭 확대 시 `previewUrl`을 우선 사용한다.
 
 ## 2026-05-11 Graphics Tool preview parity
 
