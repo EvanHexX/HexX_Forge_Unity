@@ -147,9 +147,10 @@ function compareVersions(a: string, b: string): number {
 function enrichCatalogItems(items: OnlineModCatalogItem[]): OnlineModCatalogItem[] {
     const installed = scanMods();
     const selectedGameId = getAppSettings().selectedGameId;
+    const normalizedGameId = selectedGameId?.trim();
 
     return items
-        .filter((item) => !item.gameIds || item.gameIds.length === 0 || item.gameIds.includes(selectedGameId))
+        .filter((item) => !item.gameIds || item.gameIds.length === 0 || !normalizedGameId || item.gameIds.includes(normalizedGameId))
         .map((item) => {
             const installedPackage = installed.find(
                 (pkg) => pkg.source?.type === 'github' && pkg.source.catalogId === item.id
@@ -168,9 +169,10 @@ function enrichCatalogItems(items: OnlineModCatalogItem[]): OnlineModCatalogItem
 }
 
 export async function getOnlineModCatalog(): Promise<OnlineModCatalogItem[]> {
-    const response = await fetch(CATALOG_INDEX_URL, {
+    const response = await fetch(`${CATALOG_INDEX_URL}?t=${Date.now()}`, {
         headers: {
             accept: 'application/vnd.github+json, application/json',
+            'cache-control': 'no-cache',
             'user-agent': 'HexX-Forge',
         },
     });

@@ -3631,6 +3631,8 @@ function AddModDialog({
         setZipVersion('');
         setZipDependency(undefined);
         setZipWarnings([]);
+        setOnlineMods([]);
+        setOnlineLoaded(false);
         setOnlineError('');
         setError('');
     };
@@ -3654,6 +3656,13 @@ function AddModDialog({
             void loadOnlineMods();
         }
     }, [open, activeTab, onlineLoaded, onlineLoading]);
+
+    useEffect(() => {
+        if (!open) {
+            setOnlineLoaded(false);
+            setOnlineMods([]);
+        }
+    }, [open]);
 
     const handleOnlineAction = async (item: OnlineModCatalogItem) => {
         const isUpdate = item.installed && item.updateAvailable;

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "gameId": "LongYinLiZhiZhuan",
-  "updatedAt": "2026-05-07T04:28:01.785Z",
+  "updatedAt": "2026-05-17T14:45:13.669Z",
   "fonts": [
     {
       "pathId": 2418,
@@ -14,8 +14,8 @@
       "pathId": 2419,
       "targetLabel": "2419",
       "metadataName": "汇文明朝体",
-      "currentFont": "汇文明朝体.ttf",
-      "currentFontFileName": "汇文明朝体.ttf"
+      "currentFont": "yoon_dokrip.ttf",
+      "currentFontFileName": "yoon_dokrip.ttf"
     },
     {
       "pathId": 2420,

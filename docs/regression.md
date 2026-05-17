@@ -46,6 +46,7 @@
 - 같은 모드 업데이트를 등록할 때 id를 실수로 바꾸면 기존 catalog item이 중복될 수 있다. 수정 모드에서는 id를 잠그고, `다음 버전 준비`로 version/downloadPath/sha256 갱신 흐름을 사용한다.
 - 모드 README md는 `readme` 파일 타입으로 보존해야 한다. `asset`으로 오탐하면 상세정보에서 표시되지 않고, `config/asset` 배포 경로에 섞일 수 있다.
 - 온라인 자세히보기는 ZIP 내부 파일을 다운로드해서 열지 않는다. catalog item의 `readmePath`가 GitHub raw 기준 markdown 경로를 가리켜야 한다.
+- 모드 추가 Dialog는 한 번 읽은 온라인 catalog state를 계속 들고 있으면 push 직후 새 항목이 보이지 않을 수 있다. Dialog를 닫으면 `onlineLoaded`와 목록을 초기화하고, catalog fetch는 cache-busting query/no-cache header로 raw CDN stale 응답을 피한다.
 
 ## 2026-05-15 Asset Manager catalog editor focus and applied pack state
 
