@@ -21,6 +21,8 @@ Settings 화면은 지원 게임 선택, 게임 설치 폴더, Theme, Typography
 - `window.electronAPI.checkForUpdates()`
 - `window.electronAPI.downloadUpdate()`
 - `window.electronAPI.installUpdate()`
+- `window.electronAPI.getRuntimeIntegrityStatus()`
+- `window.electronAPI.checkRuntimeIntegrity()`
 
 ## Internal Flow
 
@@ -29,6 +31,7 @@ Settings 화면은 지원 게임 선택, 게임 설치 폴더, Theme, Typography
 3. 설치 폴더 선택은 Electron native dialog 결과를 local state에 넣고, 저장 버튼이 `setGamePath`를 호출한다.
 4. 언어 선택은 `setLanguage`로 저장하고, 화면의 visible text는 `src/renderer/i18n`의 `t()`를 통해 즉시 갱신한다.
 5. 업데이트 버튼은 update service IPC를 호출하고 반환된 status를 화면에 반영한다.
+6. 런타임 파일 점검은 마지막 저장 결과를 먼저 표시하고, `다시 검사` 버튼으로 현재 파일 존재와 FFmpeg/frei0r 실행 검증을 갱신한다.
 
 ## State/Data Flow
 
@@ -41,6 +44,7 @@ Settings 화면은 지원 게임 선택, 게임 설치 폴더, Theme, Typography
 - MUI `Stack`의 `alignItems`, `justifyContent`, `flexWrap`는 direct prop으로 넘기지 않고 `sx`에 둔다.
 - update service에서 내려오는 `error`와 `message`는 service-origin message이므로 그대로 보여준다. Settings 자체 fallback 문구만 i18n으로 관리한다.
 - 새 지원 게임을 추가하면 Settings/Home 양쪽의 game display key와 install hint key도 함께 검토한다.
+- FFmpeg/frei0r 바이너리는 Git에 저장하지 않으므로, 누락 상태에서는 `resources/tools/*/README.md` 안내를 표시한다.
 
 ## Known Problems
 

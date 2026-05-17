@@ -19,6 +19,11 @@ resources/tools/AssetManager/
 storage/backups/
 storage/asset_packs/
 storage/fonts/
+asset-catalog/index.json
+asset-catalog/previews/
+asset-packs/index.json
+asset-packs/packages/
+asset-packs/thumbnails/
 ```
 
 ## 배포 / ASAR 주의
@@ -50,6 +55,11 @@ storage/fonts/
 ## 텍스처 교체 작업
 
 - `config/asset_catalog.json`을 UI 카탈로그로 사용합니다.
+- 앱에 번들된 catalog를 바꾸지 않아도 새 target을 추가할 수 있도록 GitHub raw 기반 원격 catalog 동기화를 지원한다.
+- 원격 catalog 위치는 `asset-catalog/index.json`이며, 원본 preview PNG는 `asset-catalog/previews/<category>/<id>_preview.png`에 둔다.
+- Asset Manager는 원격 catalog 상태를 확인해 업데이트 가능 여부를 표시하고, 사용자가 `Catalog 동기화`를 눌렀을 때만 `config/asset_catalog.json`과 preview 파일을 갱신한다.
+- 동기화 시 같은 `id`는 원격 catalog 항목이 우선하며, 로컬에만 있는 항목은 보존한다. 원격에서 내려받은 preview는 `config/asset-catalog/previews/...`에 저장되어 기존 `hexx-resource://preview/...` 경로로 표시된다.
+- 네트워크 오류나 원격 manifest 오류가 있어도 기존 local catalog를 계속 사용한다.
 - Asset Pack ZIP import, pack target 선택, 직접 PNG 선택을 지원합니다.
 - 어셋팩 추가 Dialog는 Mod Manager와 같은 온라인/로컬 탭 구조를 사용한다.
 - 온라인 어셋팩 catalog 위치는 `asset-packs/index.json`이며, ZIP은 `asset-packs/packages/{packId}/{version}/{packId}.zip` 경로를 사용한다.
@@ -218,12 +228,20 @@ AssetManager.tsx
 - `Ctrl+Alt+C`는 공용 developer shortcut이다. `DeveloperGateDialog` 비밀번호 확인 후 Asset Manager의 Catalog Editor를 연다.
 - 비밀번호 확인 후 열리는 개발자 전용 도구에는 Catalog Editor와 어셋팩 배포용 파일 생성 도구가 있다.
 - developer password는 OS 환경변수 `HEXX_FORGE_DEVELOPER_PASSWORD` 또는 `config/developer_access.json`에서 명시적으로 관리한다. 둘 다 없으면 Catalog Editor 접근은 차단되며 파일을 자동 생성하지 않는다.
+- Catalog Editor는 tab 구조를 사용한다. `asset_catalog.json`, `metadata/data.tsv`, `metadata/ui_textures.tsv`를 별도 tab으로 관리하고, 각 row는 기본 접힘 상태의 accordion으로 렌더링한다.
 - Catalog Editor에서 원본 미리보기 PNG를 선택하면 `config/resources/previews/<category>/<id>_preview.png`로 복사하고 item의 `preview` 값을 갱신한다.
+- Catalog Editor/개발자 도구의 `배포 catalog export`는 현재 local catalog와 preview를 `asset-catalog/index.json`, `asset-catalog/previews/...` 배포 구조로 복사한다. 생성된 파일은 개발자가 확인 후 커밋/push해야 앱에서 동기화할 수 있다.
+- `asset-catalog/index.json` manifest는 `schemaVersion: 1`, `catalogVersion`, `updatedAt`, `items[]`를 사용한다. `items[].previewSha256`이 있으면 동기화 시 preview 다운로드 검증에 사용한다.
 - 어셋팩 배포 도구는 PNG 여러 개를 선택하고 각 PNG마다 catalog target을 지정해 `pack.json`과 배포 ZIP을 생성할 수 있다. 완성된 ZIP을 직접 선택하는 legacy 경로도 유지한다.
+- 어셋팩 배포 도구는 `asset-packs/index.json`의 기존 배포 항목을 불러와 수정/삭제할 수 있다. 기존 target은 기본적으로 ZIP entry를 유지하며, row별 `PNG 교체`를 누른 항목만 새 PNG로 교체되고 삭제한 row는 다음 ZIP에서 제외된다.
 - PNG 기반 배포 생성 시 각 row의 `catalogId`, `category`, `option1`, `option2`, `displayLabel`, `textureName`, `pathId`, `size`, `png`, `preview`를 pack target으로 기록한다. `category=UI` target은 `option2` 없이 생성할 수 있다.
-- 생성된 ZIP은 `asset-packs/packages/{packId}/{version}/{packId}.zip`으로 저장하고, 각 target preview는 pack 내부 `previews/<category>/..._preview.png`에 최대 `420x280` 크기로 저장한다.
-- 선택한 대표 미리보기 PNG 또는 첫 번째 target PNG는 최대 `420x280` 크기의 catalog thumbnail로 줄여 `asset-packs/thumbnails/{packId}.png`에 저장한다.
+- 생성은 atomic flow를 사용한다. 먼저 `asset-packs/packages/__tmp-{packId}-{timestamp}`에서 `pack.json`, `files/...`, `previews/...`, ZIP, thumbnail을 완성하고 검증한 뒤, 성공한 경우에만 최종 `asset-packs/packages/{packId}/{version}/{packId}.zip`과 `asset-packs/thumbnails/{packId}.png`로 복사한다.
+- 배포 repo에는 최종 산출물만 남긴다. `__pack_staging`, `__tmp-*`, raw PNG 같은 작업용 파일은 성공/실패와 관계없이 정리 대상이며, `asset-packs/packages/...` 아래에 source asset을 보관하지 않는다.
+- 생성된 ZIP은 `asset-packs/packages/{packId}/{version}/{packId}.zip`으로 저장하고, 각 target preview는 pack 내부 `previews/<category>/..._preview.png`에 최대 `420x280` 크기로 저장한다. ZIP 검증은 `pack.json`, `targets[].png`, `targets[].preview` entry 존재를 확인한다.
+- 선택한 대표 미리보기 PNG가 있으면 이를 최대 `420x280` 크기의 catalog thumbnail로 줄여 `asset-packs/thumbnails/{packId}.png`에 저장한다. 대표 미리보기 PNG가 없으면 첫 번째 target PNG를 사용하고, 기존 pack 수정에서 모든 row가 유지 상태이면 기존 ZIP의 첫 번째 target PNG 또는 기존 thumbnail을 사용한다.
 - 어셋팩 배포 도구는 `asset-packs/index.json`을 생성/갱신하고 ZIP의 `sha256`을 catalog item에 기록한다. 생성된 `asset-packs` 하위 파일은 개발자가 확인 후 커밋한다.
+- `asset-packs/index.json`이 가리키는 ZIP 또는 thumbnail이 없으면 배포 도구는 해당 항목을 `깨짐` 상태로 표시한다. 깨진 항목은 삭제할 수 있고, 새 PNG target을 추가해 같은 id/version으로 재생성할 수 있다.
+- 배포 삭제는 `asset-packs/index.json` 항목, `asset-packs/packages/{packId}` 전체, `asset-packs/thumbnails/{packId}.png`, stale staging/temp 폴더를 함께 정리한다.
 - 배포 ZIP 생성 후에는 같은 ZIP을 로컬 `storage/asset_packs`에도 import해서 Asset Manager의 `팩 선택` 드롭다운에서 즉시 테스트할 수 있게 한다.
 - 실제 적용 성공 여부는 의상은 `resources/tools/AssetManager/metadata/data.tsv`, UI Texture는 `resources/tools/AssetManager/metadata/ui_textures.tsv`와 UnityPy 검증에 의존한다.
 
@@ -241,8 +259,10 @@ AssetManager.tsx
 - `ui_textures.tsv`는 “UI가 아닌 모든 새 asset”을 담기 위한 catch-all 파일이 아니다. 이름 그대로 UI Texture2D patch API용 metadata이다.
 - UI가 아닌 신규 asset category가 생기면, 먼저 UnityPy plan kind와 metadata TSV 이름/columns를 정하고, 이 문서의 표와 `assetPatcherService.ts` routing을 함께 갱신한다.
 - 새 metadata 파일을 추가할 때는 `asset_catalog.json`의 `category` 값, pack target 작성 규칙, UnityPy metadata row, 배포 리소스 포함 여부를 한 세트로 관리한다.
-- Catalog Editor는 `asset_catalog.json`만 저장한다. `data.tsv`, `ui_textures.tsv` 같은 UnityPy metadata 파일을 자동 수정하지 않는다.
-- Catalog Editor row는 입력 중 `id`가 바뀌어도 focus가 튀지 않도록 별도 `rowId`를 React key로 사용한다.
+- Catalog Editor의 metadata TSV tab은 `assetService.ts`의 metadata catalog registry를 기준으로 렌더링한다. 현재 registry는 `texture-data(data.tsv)`와 `ui-textures(ui_textures.tsv)`이며, 나중에 `sprite_texture`, `sound` 같은 catalog가 추가되면 registry에 key/label/path/columns/requiredColumns를 추가한다.
+- `metadata/data.tsv`는 행이 많아질 수 있으므로 editor에서 `pathID` 또는 표시명 기준 정렬을 지원한다. 정렬은 화면 표시 순서용이며 저장 시 현재 편집 상태 전체를 TSV로 다시 기록한다.
+- Catalog Editor는 `data.tsv`, `ui_textures.tsv`를 형식 검증 후 저장한다. `data.tsv`는 `size=width,height`, `ui_textures.tsv`는 `width/height`, `flip_y=true|false`를 검증한다.
+- Catalog Editor row는 입력 중 `id`나 `pathID`가 바뀌어도 focus가 튀지 않도록 별도 `rowId`를 React key로 사용한다.
 - Catalog Editor는 원본 preview 관리만 담당한다. 변경 PNG 선택은 pack 배포 도구 또는 직접 이미지 적용 흐름에서 처리한다.
 
 ## TODO
@@ -278,4 +298,4 @@ AssetManager.tsx
 - [ ] 현재폰트 표시명 상세 정보 보강
 - [ ] 원본 백업 존재 여부를 catalog item별로 표시
 - [x] `asset_catalog.json` v2 마이그레이션 완료
-- [ ] pack.json v2 검증 강화
+- [x] pack.json v2 검증 강화

@@ -16,8 +16,9 @@ import { registerAssetPackIpc } from './ipc/assetPackIpc';
 import { registerGraphicsIpc } from './ipc/graphicsIpc';
 import { registerDeveloperAccessIpc } from './ipc/developerAccessIpc';
 import { registerUpdateIpc } from './services/updateService';
+import { registerRuntimeIntegrityIpc, scheduleRuntimeIntegrityAutoCheck } from './services/runtimeIntegrityService';
 import { resolveGraphicsFile, resolveSelectedMediaFile } from './services/graphicsService';
-import { getAppRootDir, getBundledStoragePath, getStoragePath } from './services/runtimePaths';
+import { getAppRootDir, getBundledStoragePath, getStoragePath, getWritableConfigDir } from './services/runtimePaths';
 
 protocol.registerSchemesAsPrivileged([
     {
@@ -240,7 +241,14 @@ function findExistingFile(relativePath: string, baseFolders: string[]): string {
 function resolvePreviewFile(rawPath: string): string {
     // asset_catalog.json의 preview 값은 현재 config/resources/previews/... 기준 상대 경로입니다.
     // 배포 구조가 바뀌어도 config/ 하위와 app root 하위를 모두 탐색합니다.
-    return findExistingFile(rawPath, ['config', '']);
+    const safeRelativePath = normalizeRelativePath(rawPath);
+
+    if (!safeRelativePath) return '';
+
+    const writableCandidate = path.join(getWritableConfigDir(), safeRelativePath);
+    if (fsSync.existsSync(writableCandidate)) return writableCandidate;
+
+    return findExistingFile(safeRelativePath, ['config', '']);
 }
 
 function resolveAssetPackFile(rawPath: string): string {
@@ -337,6 +345,7 @@ app.whenReady().then(() => {
     registerGraphicsIpc();
     registerDeveloperAccessIpc();
     registerUpdateIpc();
+    registerRuntimeIntegrityIpc();
 
     protocol.handle('hexx-resource', async (request) => {
         const url = new URL(request.url);
@@ -381,6 +390,7 @@ app.whenReady().then(() => {
     });
 
     createMainWindow();
+    scheduleRuntimeIntegrityAutoCheck();
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

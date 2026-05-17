@@ -33,12 +33,19 @@ type OnlineModCatalogItem = {
     version: string;
     downloadPath: string;
     readmePath?: string;
+    updatePolicy?: ModUpdatePolicy;
     sha256?: string;
     gameIds?: string[];
     installedPackageId?: string;
     installedVersion?: string;
     installed?: boolean;
     updateAvailable?: boolean;
+};
+
+type ModUpdatePolicy = {
+    mode: 'replace-confirm' | 'merge' | 'overwrite';
+    preserve?: string[];
+    removeMissing?: boolean;
 };
 
 type ModDistributionInput = {
@@ -50,6 +57,7 @@ type ModDistributionInput = {
     zipPath?: string;
     readmeFilePath?: string;
     readmePath?: string;
+    updatePolicy?: ModUpdatePolicy;
     downloadPath?: string;
     sha256?: string;
     gameIds?: string[];
@@ -92,14 +100,114 @@ type AssetPackDistributionInput = {
         textureName: string;
         pathId: number;
         size?: [number, number];
-        pngPath: string;
+        pngPath?: string;
         previewPath?: string;
+        existingZipPath?: string;
+        existingPng?: string;
+        existingPreview?: string;
     }>;
+};
+
+type AssetPackDistributionCatalogItem = OnlineAssetPackCatalogItem & {
+    zipPath: string;
+    thumbnailFilePath?: string;
+    broken?: boolean;
+    brokenReason?: string;
+    missingFiles?: string[];
+    pack?: {
+        schemaVersion: number;
+        packId: string;
+        packName: string;
+        author?: string;
+        description?: string;
+        version?: string;
+        targets: Array<{
+            catalogId: string;
+            category: string;
+            option1?: string;
+            gender?: string;
+            option1Label?: string;
+            option2?: string;
+            displayLabel?: string;
+            textureName: string;
+            pathId: number;
+            size?: [number, number];
+            png: string;
+            preview?: string;
+        }>;
+    };
+};
+
+type AssetCatalogSyncStatus = {
+    ok: boolean;
+    checkedAt: string;
+    updateAvailable: boolean;
+    currentVersion: string;
+    currentUpdatedAt: string;
+    remoteVersion?: string;
+    remoteUpdatedAt?: string;
+    itemCount: number;
+    remoteItemCount?: number;
+    error?: string;
+};
+
+type AssetCatalogSyncResult = {
+    status: AssetCatalogSyncStatus;
+    catalog: unknown;
+    warnings: string[];
+};
+
+type AssetCatalogDistributionResult = {
+    indexPath: string;
+    previewCount: number;
+    catalogVersion: string;
+    itemCount: number;
+};
+
+type MetadataCatalogRow = {
+    rowId?: string;
+    values: Record<string, string>;
+};
+
+type MetadataCatalogData = {
+    key: string;
+    label: string;
+    description: string;
+    path: string;
+    columns: string[];
+    requiredColumns: string[];
+    rows: MetadataCatalogRow[];
 };
 
 type LaunchGameResult = {
     ok: boolean;
     message?: string;
+};
+
+type RuntimeIntegrityResult = {
+    ok: boolean;
+    checkedAt: string;
+    appVersion: string;
+    items: Array<{
+        id: string;
+        label: string;
+        path: string;
+        required: boolean;
+        exists: boolean;
+        status: 'ok' | 'missing' | 'failed';
+        message?: string;
+    }>;
+    ffmpegDiagnostics?: {
+        ok: boolean;
+        ffmpegPath: string;
+        ffprobePath: string;
+        frei0rPath?: string;
+        version?: string;
+        supportsFrei0r?: boolean;
+        missingFrei0rPlugins?: string[];
+        failedFrei0rPlugins?: string[];
+        message?: string;
+    };
 };
 
 const electronAPI = {
@@ -132,6 +240,10 @@ const electronAPI = {
     readManualDocument: (documentPath: string): Promise<string> =>
         ipcRenderer.invoke('docs:read-manual', documentPath),
     launchGame: (): Promise<LaunchGameResult> => ipcRenderer.invoke('game:launch'),
+    getRuntimeIntegrityStatus: (): Promise<RuntimeIntegrityResult | null> =>
+        ipcRenderer.invoke('runtime:get-integrity-status'),
+    checkRuntimeIntegrity: (): Promise<RuntimeIntegrityResult> =>
+        ipcRenderer.invoke('runtime:check-integrity'),
     getDeveloperAccessStatus: () => ipcRenderer.invoke('developer:get-access-status'),
     verifyDeveloperPassword: (password: string) => ipcRenderer.invoke('developer:verify-password', password),
 
@@ -149,8 +261,8 @@ const electronAPI = {
         ipcRenderer.invoke('mods:delete-distribution-item', id),
     downloadOnlineMod: (item: OnlineModCatalogItem) =>
         ipcRenderer.invoke('mods:download-online-mod', item),
-    updateOnlineMod: (item: OnlineModCatalogItem) =>
-        ipcRenderer.invoke('mods:update-online-mod', item),
+    updateOnlineMod: (item: OnlineModCatalogItem, confirmedReplace?: boolean) =>
+        ipcRenderer.invoke('mods:update-online-mod', item, confirmedReplace),
     selectModImportFile: () => ipcRenderer.invoke('mods:select-import-file'),
     selectFile: (accept?: string) => ipcRenderer.invoke('mods:select-file', accept),
     readTextFile: (filePath: string) => ipcRenderer.invoke('mods:read-text-file', filePath),
@@ -178,6 +290,7 @@ const electronAPI = {
             packageType: 'collection' | 'single';
             version?: string;
             dependency?: { target: string; displayName?: string; installBase?: string };
+            updatePolicy?: ModUpdatePolicy;
             files: Array<{
                 entryName: string;
                 type: string;
@@ -194,6 +307,7 @@ const electronAPI = {
         packageType: 'collection' | 'single';
         version?: string;
         dependency?: { target: string; displayName?: string; installBase?: string };
+        updatePolicy?: ModUpdatePolicy;
         files: Array<{ filePath: string; name: string; author: string }>;
     }) => ipcRenderer.invoke('mods:create-and-import', data),
 
@@ -229,8 +343,18 @@ const electronAPI = {
     restoreAssetBackup: (type: 'font' | 'asset') => ipcRenderer.invoke('asset:restore-backup', type),
     getTextureCatalog: () => ipcRenderer.invoke('asset:get-texture-catalog'),
     getAssetCatalog: () => ipcRenderer.invoke('asset:get-catalog'),
+    getAssetCatalogSyncStatus: (): Promise<AssetCatalogSyncStatus> =>
+        ipcRenderer.invoke('asset:get-catalog-sync-status'),
+    syncAssetCatalogFromRemote: (): Promise<AssetCatalogSyncResult> =>
+        ipcRenderer.invoke('asset:sync-catalog-from-remote'),
     getCatalogEditorData: () => ipcRenderer.invoke('asset:get-catalog-editor-data'),
     saveCatalogEditorData: (catalog: any) => ipcRenderer.invoke('asset:save-catalog-editor-data', catalog),
+    exportAssetCatalogDistribution: (): Promise<AssetCatalogDistributionResult> =>
+        ipcRenderer.invoke('asset:export-catalog-distribution'),
+    getMetadataCatalogs: (): Promise<MetadataCatalogData[]> =>
+        ipcRenderer.invoke('asset:get-metadata-catalogs'),
+    saveMetadataCatalog: (key: string, rows: MetadataCatalogRow[]): Promise<MetadataCatalogData> =>
+        ipcRenderer.invoke('asset:save-metadata-catalog', key, rows),
     getCurrentAssetPacks: () => ipcRenderer.invoke('asset:get-current-asset-packs'),
     saveCurrentAssetPacks: (entries: any[]) => ipcRenderer.invoke('asset:save-current-asset-packs', entries),
     clearCurrentAssetPacks: () => ipcRenderer.invoke('asset:clear-current-asset-packs'),
@@ -254,6 +378,7 @@ const electronAPI = {
         packageType: 'collection' | 'single';
         version?: string;
         dependency?: { target: string; displayName?: string; installBase?: string };
+        updatePolicy?: ModUpdatePolicy;
         files: Array<{ filePath: string; name: string; author: string }>;
         settingsScript?: unknown;
         sources?: Array<{
@@ -311,6 +436,10 @@ const electronAPI = {
     selectAssetPackThumbnail: () => ipcRenderer.invoke('asset:select-pack-thumbnail'),
     selectAssetPackPngs: () => ipcRenderer.invoke('asset:select-pack-pngs'),
     importAssetPack: (zipPath: string) => ipcRenderer.invoke('asset:import-pack', zipPath),
+    getAssetPackDistributionCatalog: (): Promise<AssetPackDistributionCatalogItem[]> =>
+        ipcRenderer.invoke('asset:get-pack-distribution-catalog'),
+    deleteAssetPackDistributionItem: (id: string) =>
+        ipcRenderer.invoke('asset:delete-pack-distribution-item', id),
     createAssetPackDistribution: (input: AssetPackDistributionInput) =>
         ipcRenderer.invoke('asset:create-pack-distribution', input),
 };

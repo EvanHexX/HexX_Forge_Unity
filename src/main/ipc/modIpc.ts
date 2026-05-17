@@ -27,7 +27,7 @@ import {
     setPackageEnabled,
     writeConfigFileText,
 } from '../services/modService';
-import type { ApplyPackageSettingsChanges, ModFileType, ScriptConfig } from '../services/modService';
+import type { ApplyPackageSettingsChanges, ModFileType, ScriptConfig, UpdatePolicy } from '../services/modService';
 import {
     deleteModDistributionItem,
     getModDistributionCatalog,
@@ -63,8 +63,8 @@ export function registerModIpc(): void {
         installOnlineMod(item)
     );
 
-    ipcMain.handle('mods:update-online-mod', (_event, item: OnlineModCatalogItem) =>
-        updateOnlineMod(item)
+    ipcMain.handle('mods:update-online-mod', (_event, item: OnlineModCatalogItem, confirmedReplace?: boolean) =>
+        updateOnlineMod(item, confirmedReplace === true)
     );
 
     ipcMain.handle('mods:set-package-enabled', (_event, packageId: string, enabled: boolean) =>
@@ -196,6 +196,7 @@ export function registerModIpc(): void {
                 packageType: 'collection' | 'single';
                 version?: string;
                 dependency?: { target: string; displayName?: string; installBase?: string };
+                updatePolicy?: UpdatePolicy;
                 files: Array<{ filePath: string; name: string; author: string }>;
             }
         ) => createAndImportPackage(data)

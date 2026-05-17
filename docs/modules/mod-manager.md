@@ -441,6 +441,34 @@ type ZipEntryInfo = {
 - Mod Manager 목록과 상세 Dialog는 package `version`을 표시한다.
 - 온라인 catalog는 `mods/index.json`의 `mods[].version`을 최신 버전으로 보고, 설치된 package `version`과 비교해 update 가능 여부를 계산한다.
 
+## Package Update Policy
+
+- `mod-info.json`, `config/mod_list.json`, `mods/index.json` catalog item은 선택적으로 `updatePolicy`를 가질 수 있다.
+- Schema:
+
+```json
+{
+  "updatePolicy": {
+    "mode": "replace-confirm",
+    "preserve": [
+      "config/MyMod.cfg",
+      "plugins/MyMod/user-data.json",
+      "plugins/ResourceInjector/packs"
+    ],
+    "removeMissing": false
+  }
+}
+```
+
+- `mode`:
+  - `replace-confirm`: 업데이트 전 사용자 확인을 받고 기존 package를 삭제한 뒤 새 ZIP을 import한다. 기존 catalog/ZIP에 `updatePolicy`가 없으면 이 방식이 기본값이다.
+  - `merge`: 기존 package id, GitHub source, 활성 상태를 유지하고 새 ZIP의 파일을 반영한다. `preserve[]`에 선언된 파일/폴더는 package storage와 BepInEx 배포 위치에서 덮어쓰거나 삭제하지 않는다.
+  - `overwrite`: 단일 DLL처럼 보존/merge 대상이 없는 단순 모드용이다. 기존 package id와 활성 상태를 유지하되 새 ZIP 기준으로 DLL과 package 파일을 교체한다.
+- `preserve[]`는 `files[].path`와 같은 BepInEx/package 상대경로 표기를 쓴다. 종속 모드 `dependency.installBase`가 적용되는 파일은 최종 BepInEx 기준 경로도 보존 매칭에 사용한다.
+- `removeMissing`은 기본 `false`이다. `merge`에서 `true`이면 새 ZIP에 없는 비보존 파일은 제거하고, `preserve[]` 경로는 항상 유지한다. `overwrite`는 단순 교체 의미가 강하므로 새 ZIP에 없는 비보존 파일을 제거한다.
+- Mod Packing Step 1과 온라인 모드 배포 Catalog 도구에서 업데이트 방식을 선택하고, `merge`일 때 보존 경로를 입력할 수 있다.
+- 온라인 업데이트 flow는 새 ZIP을 다운로드한 뒤 manifest의 `updatePolicy`를 우선 확인한다. ZIP manifest에 없으면 catalog item의 `updatePolicy`, 둘 다 없으면 `replace-confirm`으로 처리한다.
+
 ## Online Mod Upload Test
 
 1. Mod Packing에서 ZIP을 만들고 version을 입력한다.

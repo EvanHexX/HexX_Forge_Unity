@@ -1,4 +1,18 @@
 {
   "schemaVersion": 1,
-  "assetPacks": []
+  "assetPacks": [
+    {
+      "id": "hexx-starfall-from-ninth-heaven",
+      "name": "성락구천팩 4K",
+      "author": "HexX",
+      "description": "성락구천 컨셉의 UI 어셋 변경 팩 4K 버전\n: 업스케일 팩은 HexX UI Tweek 모드와 함께 사용하셔야 정상 표시됩니다. 어셋과 스트리밍 사이즈를 변경합니다. 모드를 통한 런타임 교체에 비해 CPU, GPU, RAM 의 부담이 적으나, 4K 업스케일 임을 감안해 주세요.",
+      "version": "1.0.0",
+      "downloadPath": "asset-packs/packages/hexx-starfall-from-ninth-heaven/1.0.0/hexx-starfall-from-ninth-heaven.zip",
+      "thumbnailPath": "asset-packs/thumbnails/hexx-starfall-from-ninth-heaven.png",
+      "sha256": "290ed58a5723538cdc606d4507de275cd8b2be06328ac2a1980cb94d3f1dc2b0",
+      "gameIds": [
+        "long-yin-li-zhi-zhuan"
+      ]
+    }
+  ]
 }

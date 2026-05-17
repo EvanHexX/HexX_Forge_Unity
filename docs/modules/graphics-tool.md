@@ -85,7 +85,7 @@ Video Tool은 다음 기능을 제공한다.
 
 Loop 만들기는 중요한 선택이므로 MUI Dialog로 확인한다. 이미 자연 루프인 영상은 처리할 필요가 없다는 문구를 보여준 뒤, 사용자가 계속하면 원본 영상과 역재생 영상을 이어 붙인다. 완료 결과는 임시/선택 출력 파일로 저장한 뒤 현재 Video Tool source로 다시 로딩한다.
 
-FFmpeg는 앱에 포함 배포한다. 예상 위치는 `resources/tools/ffmpeg/ffmpeg.exe`, `resources/tools/ffmpeg/ffprobe.exe`이다. `ffplay.exe`는 HTML video preview를 사용하므로 필요하지 않다. Graphics Tool 진입 시 실행 가능 여부와 frei0r 지원 여부를 검사하고, 누락 또는 실행 실패는 `NotificationContext`로 알린다.
+FFmpeg는 앱에 포함 배포한다. 예상 위치는 `resources/tools/ffmpeg/ffmpeg.exe`, `resources/tools/ffmpeg/ffprobe.exe`이다. `ffplay.exe`는 HTML video preview를 사용하므로 필요하지 않다. Graphics Tool 진입 시 실행 가능 여부와 frei0r 지원 여부를 검사하고, 누락 또는 실행 실패는 `NotificationContext`로 알린다. Settings의 런타임 파일 점검도 같은 FFmpeg/frei0r 검증 결과를 사용해 업데이트 후 누락 상태를 미리 확인한다.
 
 기본 export 정책:
 

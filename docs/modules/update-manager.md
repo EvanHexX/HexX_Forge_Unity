@@ -10,6 +10,7 @@ HexX Forge uses `electron-builder` and `electron-updater` to publish and install
 - `quitAndInstall()` is called only after the user clicks the restart/install button.
 - Development builds do not contact GitHub for updates. They return a packaged-build-only status message instead.
 - While update status is `checking` or `downloading`, the renderer shows the shared splash overlay. Download progress is passed into the overlay progress bar when available.
+- Packaged builds run a runtime file integrity check once after app version changes. The result is stored in writable config as `runtime_integrity.json` and can be re-run from Settings.
 
 ## Release flow
 
@@ -53,5 +54,6 @@ For a local package without upload, run `npm.cmd run dist`.
 ## Follow-up integrity policy
 
 - Current release gate: required runtime file existence plus FFmpeg/frei0r dry-run validation.
+- Runtime UI check: `runtimeIntegrityService` checks required AssetManager, FFmpeg, and frei0r files and records the last result per app version.
 - Next minor release target: generate a `resources/manifest.json` during release packaging and verify SHA-256 hashes for required runtime files after update installation or on first launch after update.
 - If manifest validation fails, the app should keep general UI usable, disable affected tool actions, and show a copyable `NotificationContext` diagnostic instead of failing later during export.

@@ -36,12 +36,19 @@ export type ModPackage = {
     hasSettings: boolean;
     readmePath?: string;
     dependency?: PackageDependency;
+    updatePolicy?: ModUpdatePolicy;
     dependencyState?: 'ok' | 'missing' | 'disabled';
     dependencyParentId?: string;
     installPathHints?: string[];
     version?: string;
     source?: ModPackageSource;
     updateAvailable?: boolean;
+};
+
+export type ModUpdatePolicy = {
+    mode: 'replace-confirm' | 'merge' | 'overwrite';
+    preserve?: string[];
+    removeMissing?: boolean;
 };
 
 export type PackageDependency = {
@@ -64,6 +71,8 @@ export type OnlineModCatalogItem = {
     description: string;
     version: string;
     downloadPath: string;
+    readmePath?: string;
+    updatePolicy?: ModUpdatePolicy;
     sha256?: string;
     gameIds?: string[];
     installedPackageId?: string;

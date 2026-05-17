@@ -26,6 +26,16 @@
 - 예방: export ZIP은 항상 최상위 `mod-info.json`을 새로 생성하고, `version`, `dependency`, `files`를 보존한다. `enabled`, GitHub `source` 등 로컬 설치 상태는 제외한다.
 - DLL은 활성/비활성 위치에서, non-DLL 배포 파일은 `storage/packages/{packageId}`에서 읽어야 한다. `folder`는 ZIP entry가 아니라 manifest entry로만 유지한다.
 
+## 2026-05-17 Mod Manager update policy
+
+- 증상: 온라인 모드 업데이트가 항상 기존 package 삭제 후 재설치로만 동작하면 사용자 config, registry JSON, asset pack 폴더가 손실될 수 있다.
+- 원인: catalog/manifest에 업데이트 정책이 없고 update flow가 `deletePackage -> importZipMod` 단일 경로였다.
+- 예방: `mod-info.json`/catalog의 `updatePolicy`를 읽고 `replace-confirm`, `merge`, `overwrite`를 분기한다.
+- `merge`에서는 `preserve[]` 경로를 package storage와 BepInEx 배포 위치 양쪽에서 덮어쓰기/삭제하지 않아야 한다.
+- `removeMissing: true` 또는 `overwrite`에서도 `preserve[]`는 삭제하면 안 된다.
+- 종속 모드 `dependency.installBase`가 있는 파일은 `files[].path`와 최종 BepInEx 배포 경로를 모두 보존 경로 매칭 대상으로 본다.
+- `updatePolicy`가 없는 기존 ZIP/catalog는 호환을 위해 `replace-confirm`으로 처리하고, renderer는 업데이트 전에 삭제 후 재설치 확인 Dialog를 보여줘야 한다.
+
 ## 2026-05-17 Mod Manager online distribution editor
 
 - 증상: 관리자 도구에서 온라인 모드를 추가/수정했지만 앱 온라인 탭에서 404 또는 catalog 형식 오류가 발생할 수 있다.
@@ -45,6 +55,29 @@
 - Catalog Editor는 `asset_catalog.json` 원본 target/preview 관리용이다. 변경 PNG는 pack 배포 도구 또는 직접 적용 flow에서만 선택한다.
 - pack 적용 성공 후에는 `config/current_asset_packs.json`에 catalogId별 적용 pack 상태를 기록한다. 미리보기 UI는 이 파일을 기준으로 현재 적용 pack preview를 우선 표시한다.
 - 어셋 백업 복원이나 외부 게임 업데이트로 원본 파일이 돌아간 뒤 `current_asset_packs.json`이 남아 있으면 UI가 잘못된 pack preview를 현재 상태처럼 보여준다. 어셋 복원 시 자동 초기화하고, 외부 복원 대응용 수동 초기화 버튼을 유지한다.
+
+## 2026-05-17 Asset Manager remote catalog sync
+
+- 증상: 새 어셋팩 target을 추가하려면 `config/asset_catalog.json`과 preview 파일이 앱에 번들되어야 해서 전체 앱 업데이트가 필요했다.
+- 원인: Asset Manager의 원본 대상 catalog는 로컬 config만 읽고, 온라인 어셋팩 ZIP catalog와 별도의 작은 업데이트 채널이 없었다.
+- 예방: 배포용 catalog는 `asset-catalog/index.json`과 `asset-catalog/previews/...`에 두고, 앱은 수동 `Catalog 동기화`로 GitHub raw catalog를 받아 `config/asset_catalog.json`과 preview cache를 갱신한다.
+- 같은 catalog `id`는 원격 항목이 우선한다. 로컬 preview download가 실패하면 해당 항목은 유지하되 preview를 비워 UI가 stale 이미지를 현재 원본처럼 보여주지 않게 한다.
+
+## 2026-05-17 Asset Manager metadata TSV editor
+
+- 증상: `asset_catalog.json`만 UI에서 수정할 수 있으면 UnityPy patch 기준인 `metadata/data.tsv`, `metadata/ui_textures.tsv`와 catalog가 쉽게 desync될 수 있다.
+- 원인: Electron catalog와 UnityPy metadata가 역할은 분리되어 있지만, 개발자 도구가 한쪽만 편집하게 되어 있었다.
+- 예방: Catalog Editor는 catalog JSON과 metadata TSV를 tab으로 분리해 관리한다. TSV tab은 metadata registry를 기준으로 columns를 렌더링하고, 각 row는 기본 접힘 accordion으로 표시해 100개 이상 행에서도 스캔 가능하게 유지한다.
+- `data.tsv`와 `ui_textures.tsv`는 서로 다른 UnityPy API의 source of truth이므로 한 파일에 섞지 않는다. 신규 asset kind는 별도 TSV/plan kind/registry entry로 추가한다.
+
+## 2026-05-17 Asset Pack distribution edit
+
+- 증상: 한 번 배포한 어셋팩에서 일부 target만 유지/교체/삭제하려면 pack을 처음부터 다시 구성해야 했다.
+- 원인: 배포 도구가 `asset-packs/index.json`에 새 항목을 upsert하고 ZIP을 새로 쓰는 기능만 제공했고, 기존 ZIP의 target entry를 재사용하는 경로가 없었다.
+- 예방: 배포 도구는 기존 배포 항목을 읽고, 유지 row는 기존 ZIP entry를 새 ZIP staging으로 복사한다. 사용자가 `PNG 교체`한 row만 새 PNG를 사용하고, 삭제한 row는 다음 `pack.json`에서 제외한다.
+- 추가 증상: ZIP 생성 실패 뒤 `asset-packs/packages/.../__pack_staging/files/...png` 같은 raw 작업물이 남고, `asset-packs/index.json`은 존재하지 않는 ZIP을 가리킬 수 있었다.
+- 추가 원인: staging을 최종 version 폴더 안에 만들고, 생성 시작 시 기존 `packages/{packId}`를 먼저 삭제해 수정 배포에서 기존 ZIP entry를 재사용하기 어렵거나 실패 산출물이 남을 수 있었다.
+- 예방: 배포 생성은 `packages/__tmp-{packId}-{timestamp}`에서 ZIP과 thumbnail을 완성한 뒤 검증에 성공한 경우에만 최종 ZIP/thumbnail/index를 갱신한다. 성공/실패 후 `__pack_staging`과 `__tmp-*`를 정리하고, 배포 catalog 조회는 missing ZIP/thumbnail을 `깨짐` 상태로 표시해야 한다.
 
 ## 2026-05-11 Graphics Tool preview parity
 

@@ -1,6 +1,7 @@
 # Local app/dev settings
 config/app_settings.json
 config/developer_access.json
+config/runtime_integrity.json
 developer_access.json
 .ai/
 .claude/settings.local.json

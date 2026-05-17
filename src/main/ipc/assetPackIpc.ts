@@ -5,6 +5,8 @@ import { dialog, ipcMain, nativeImage } from 'electron';
 import path from 'node:path';
 import {
     createAssetPackDistribution,
+    deleteAssetPackDistributionItem,
+    getAssetPackDistributionCatalog,
     getAssetPacks,
     getOnlineAssetPackCatalog,
     installOnlineAssetPack,
@@ -83,5 +85,13 @@ export function registerAssetPackIpc(): void {
 
     ipcMain.handle('asset:create-pack-distribution', (_event, input: AssetPackDistributionInput) => {
         return createAssetPackDistribution(input);
+    });
+
+    ipcMain.handle('asset:get-pack-distribution-catalog', () => {
+        return getAssetPackDistributionCatalog();
+    });
+
+    ipcMain.handle('asset:delete-pack-distribution-item', (_event, id: string) => {
+        return deleteAssetPackDistributionItem(id);
     });
 }

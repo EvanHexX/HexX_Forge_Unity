@@ -44,6 +44,14 @@ export type PackageDependency = {
     installBase?: string;
 };
 
+export type UpdatePolicyMode = 'replace-confirm' | 'merge' | 'overwrite';
+
+export type UpdatePolicy = {
+    mode: UpdatePolicyMode;
+    preserve?: string[];
+    removeMissing?: boolean;
+};
+
 export type PackageMeta = {
     id: string;
     name: string;
@@ -54,6 +62,7 @@ export type PackageMeta = {
     files: ModFileInfo[];
     enabled?: boolean;
     dependency?: PackageDependency;
+    updatePolicy?: UpdatePolicy;
     version?: string;
     source?: ModPackageSource;
 };
@@ -76,6 +85,7 @@ export type ModPackage = {
     hasSettings: boolean;
     readmePath?: string;
     dependency?: PackageDependency;
+    updatePolicy?: UpdatePolicy;
     dependencyState?: 'ok' | 'missing' | 'disabled';
     dependencyParentId?: string;
     installPathHints?: string[];
@@ -91,6 +101,7 @@ export type ModPackageSource = {
 
 export type ImportPackageMetadata = {
     version?: string;
+    updatePolicy?: UpdatePolicy;
     source?: ModPackageSource;
 };
 
@@ -231,6 +242,7 @@ type HexXModInfoFile = {
     packageType?: 'collection' | 'single';
     version?: string;
     dependency?: PackageDependency;
+    updatePolicy?: UpdatePolicy;
     files?: Array<{
         path: string;
         name?: string;
@@ -572,6 +584,41 @@ function sanitizePackageDependency(dependency?: PackageDependency): PackageDepen
     };
 }
 
+export function sanitizeUpdatePolicy(updatePolicy?: UpdatePolicy): UpdatePolicy | undefined {
+    if (!updatePolicy) return undefined;
+    const mode: UpdatePolicyMode =
+        updatePolicy.mode === 'merge' || updatePolicy.mode === 'overwrite'
+            ? updatePolicy.mode
+            : 'replace-confirm';
+    const preserve = (updatePolicy.preserve ?? [])
+        .map((item) => normalizeRelativePath(item).replace(/\/+$/, '').trim())
+        .filter((item) => item && !path.isAbsolute(item) && !item.includes('..'));
+    return {
+        mode,
+        preserve: preserve.length > 0 ? [...new Set(preserve)] : undefined,
+        removeMissing: updatePolicy.removeMissing === true,
+    };
+}
+
+function getEffectiveUpdatePolicy(updatePolicy?: UpdatePolicy): UpdatePolicy {
+    return sanitizeUpdatePolicy(updatePolicy) ?? { mode: 'replace-confirm', removeMissing: false };
+}
+
+function isPreservedUpdatePath(relativePath: string, preserve: string[] = []): boolean {
+    const normalized = normalizeRelativePath(relativePath).replace(/\/+$/, '').toLowerCase();
+    return preserve.some((item) => {
+        const preserved = normalizeRelativePath(item).replace(/\/+$/, '').toLowerCase();
+        return normalized === preserved || normalized.startsWith(`${preserved}/`);
+    });
+}
+
+function isPreservedPackagePath(pkgMeta: PackageMeta, file: Pick<ModFileInfo, 'path' | 'type'>, preserve: string[] = []): boolean {
+    return (
+        isPreservedUpdatePath(file.path, preserve) ||
+        isPreservedUpdatePath(getDeployRelativePath(pkgMeta, file), preserve)
+    );
+}
+
 function getDeployRelativePath(pkgMeta: PackageMeta, file: Pick<ModFileInfo, 'path' | 'type'>): string {
     const normalizedPath = normalizeRelativePath(file.path).replace(/\/+$/, '');
     if (file.type !== 'script' && file.type !== 'mod-info' && file.type !== 'dll' && file.type !== 'readme' && !isBepInExRootedPath(normalizedPath)) {
@@ -699,6 +746,7 @@ export function scanMods(): ModPackage[] {
             hasSettings,
             readmePath,
             dependency: pkgMeta.dependency,
+            updatePolicy: pkgMeta.updatePolicy,
             dependencyState: dependency.state,
             dependencyParentId: dependency.parentId,
             installPathHints: collectInstallPathHints(pkgMeta),
@@ -1086,6 +1134,7 @@ export function importZipMod(filePath: string, metadata: ImportPackageMetadata =
         files: infoFiles,
         enabled: false,
         dependency: sanitizePackageDependency(info.dependency),
+        updatePolicy: sanitizeUpdatePolicy(metadata.updatePolicy ?? info.updatePolicy),
         version: metadata.version || info.version,
         source: metadata.source,
     };
@@ -1106,6 +1155,7 @@ export function importZipWithConfig(
         packageType: 'collection' | 'single';
         version?: string;
         dependency?: PackageDependency;
+        updatePolicy?: UpdatePolicy;
         files: Array<{
             entryName: string;
             type: ModFileType;
@@ -1205,11 +1255,266 @@ export function importZipWithConfig(
         })),
         enabled: false,
         dependency: sanitizePackageDependency(config.dependency),
+        updatePolicy: sanitizeUpdatePolicy(config.updatePolicy),
         version: config.version,
     };
 
     modListFile.packages[packageId] = pkgMeta;
     saveModListFile(modListFile);
+
+    return scanMods();
+}
+
+type AdmZipEntry = ReturnType<AdmZip['getEntries']>[number];
+
+type ParsedPackageZip = {
+    zip: AdmZip;
+    entries: AdmZipEntry[];
+    info: HexXModInfoFile;
+    infoFiles: ModFileInfo[];
+    dllEntries: AdmZipEntry[];
+};
+
+function parsePackageZip(zipPath: string): ParsedPackageZip {
+    const zip = new AdmZip(zipPath);
+    const entries = zip.getEntries();
+    const infoEntry = entries.find((entry) => {
+        const name = entry.entryName.toLowerCase();
+        return name.endsWith('hexx-mod-info.json') || name.endsWith('mod-info.json');
+    });
+
+    let info: HexXModInfoFile = {};
+    if (infoEntry) {
+        info = parseJsonText<HexXModInfoFile>(infoEntry.getData().toString('utf-8'));
+        info = { ...info, files: resolveNestedModInfo(zip, info) };
+    }
+
+    const dllEntries = entries.filter(
+        (entry) => !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.dll')
+    );
+    const infoFiles: ModFileInfo[] = info.files
+        ? info.files.map((f) => ({
+              path: normalizeRelativePath(f.path),
+              type: (f.type as ModFileType) || 'dll',
+              name: f.name,
+              author: f.author,
+              dependsOn: f.dependsOn,
+          }))
+        : dllEntries.map((entry) => ({
+              path: normalizeRelativePath(entry.entryName),
+              type: 'dll' as ModFileType,
+          }));
+
+    return { zip, entries, info, infoFiles, dllEntries };
+}
+
+export function inspectPackageManifest(zipPath: string): {
+    name?: string;
+    version?: string;
+    dependency?: PackageDependency;
+    updatePolicy?: UpdatePolicy;
+} {
+    const { info } = parsePackageZip(zipPath);
+    return {
+        name: info.name,
+        version: info.version,
+        dependency: sanitizePackageDependency(info.dependency),
+        updatePolicy: sanitizeUpdatePolicy(info.updatePolicy),
+    };
+}
+
+function findZipEntry(zip: AdmZip, entryName: string): AdmZipEntry | null {
+    const normalized = normalizeRelativePath(entryName);
+    return (
+        zip.getEntry(normalized) ??
+        (normalized.toLowerCase().startsWith('plugins/')
+            ? zip.getEntry(normalized.slice('plugins/'.length))
+            : null)
+    );
+}
+
+function removePathIfExists(targetPath: string): void {
+    if (!fs.existsSync(targetPath)) return;
+    fs.rmSync(targetPath, { recursive: true, force: true });
+}
+
+function cleanEmptyParents(startDir: string, stopDir: string): void {
+    let current = path.dirname(startDir);
+    const stop = path.resolve(stopDir);
+    while (current && path.resolve(current).startsWith(stop) && path.resolve(current) !== stop) {
+        try {
+            if (fs.existsSync(current) && fs.readdirSync(current).length === 0) {
+                fs.rmdirSync(current);
+                current = path.dirname(current);
+                continue;
+            }
+        } catch {
+            // ignore cleanup failures
+        }
+        break;
+    }
+}
+
+function deployUpdatedPackageFiles(pkgMeta: PackageMeta, pkgDir: string, preserve: string[]): void {
+    const bepInExDir = getBepInExDir();
+    if (!bepInExDir) return;
+    for (const file of pkgMeta.files) {
+        if (file.type !== 'config' && file.type !== 'asset') continue;
+        if (isPreservedPackagePath(pkgMeta, file, preserve)) continue;
+        const src = path.join(pkgDir, file.path);
+        if (!fs.existsSync(src)) continue;
+        const dst = resolveBepInExRelative(getDeployRelativePath(pkgMeta, file));
+        ensureParentDir(dst);
+        fs.copyFileSync(src, dst);
+    }
+}
+
+function uniqueModFiles(files: ModFileInfo[]): ModFileInfo[] {
+    const seen = new Set<string>();
+    const result: ModFileInfo[] = [];
+    for (const file of files) {
+        const normalizedPath = normalizeRelativePath(file.path).replace(/\/+$/, '');
+        if (!normalizedPath) continue;
+        const key = `${normalizedPath.toLowerCase()}::${file.type}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push({ ...file, path: normalizedPath });
+    }
+    return result;
+}
+
+export function updatePackageFromZip(
+    packageId: string,
+    zipPath: string,
+    metadata: ImportPackageMetadata & { updatePolicy?: UpdatePolicy } = {}
+): ModPackage[] {
+    ensureDirs();
+
+    const modListFile = readModListFile();
+    const existing = modListFile.packages[packageId];
+    if (!existing) throw new Error('업데이트할 모드 패키지를 찾을 수 없습니다.');
+
+    const parsed = parsePackageZip(zipPath);
+    const policy = getEffectiveUpdatePolicy(metadata.updatePolicy ?? parsed.info.updatePolicy ?? existing.updatePolicy);
+    const preserve = policy.preserve ?? [];
+    const removeMissing = policy.mode === 'overwrite' ? true : policy.removeMissing === true;
+    const pkgDir = path.join(PACKAGES_DIR, packageId);
+    fs.mkdirSync(pkgDir, { recursive: true });
+
+    const packageDllsMap = buildPackageDllsMap(modListFile);
+    const currentDlls = packageDllsMap.get(packageId) ?? [];
+    const wasEnabled = getPackageEnabledFromMeta(existing, currentDlls) === true;
+    const currentDllEnabled = new Map(currentDlls.map((dll) => [normalizeRelativePath(dll.relativePath).toLowerCase(), dll.enabled]));
+
+    const newDllPaths = new Set<string>();
+    for (const entry of parsed.dllEntries) {
+        const relativePath = normalizeRelativePath(entry.entryName);
+        newDllPaths.add(relativePath.toLowerCase());
+        const oldEnabled = currentDllEnabled.get(relativePath.toLowerCase());
+        const targetPath = oldEnabled === true || (oldEnabled === undefined && wasEnabled)
+            ? getActiveDllPath(relativePath)
+            : getDisabledDllPath(relativePath);
+        ensureParentDir(targetPath);
+        fs.writeFileSync(targetPath, entry.getData());
+
+        const fileMeta = parsed.infoFiles.find((f) => normalizeRelativePath(f.path).toLowerCase() === relativePath.toLowerCase());
+        modListFile.mods[relativePath] = {
+            name: fileMeta?.name || parsed.info.name || existing.name || path.basename(relativePath),
+            author: fileMeta?.author || parsed.info.author || existing.author || '',
+            description: parsed.info.description || existing.description || '',
+            packageId,
+            version: metadata.version || parsed.info.version || existing.version,
+            source: metadata.source || existing.source,
+        };
+    }
+
+    if (removeMissing) {
+        for (const oldDllPath of existing.dllPaths) {
+            const normalized = normalizeRelativePath(oldDllPath);
+            if (newDllPaths.has(normalized.toLowerCase())) continue;
+            if (isPreservedUpdatePath(normalized, preserve)) continue;
+            for (const candidate of [...getActiveDllPathCandidates(normalized), ...getDisabledDllPathCandidates(normalized)]) {
+                removePathIfExists(candidate);
+            }
+            delete modListFile.mods[normalized];
+        }
+    }
+
+    const newInfoByPath = new Map(parsed.infoFiles.map((file) => [normalizeRelativePath(file.path).replace(/\/+$/, '').toLowerCase(), file]));
+    for (const file of parsed.infoFiles) {
+        const normalizedPath = normalizeRelativePath(file.path).replace(/\/+$/, '');
+        if (!normalizedPath || file.type === 'folder' || file.type === 'dll') continue;
+        if (isGeneratedModInfoCandidate(normalizedPath) || file.type === 'mod-info') continue;
+        if (isPreservedPackagePath(existing, file, preserve) && fs.existsSync(path.join(pkgDir, normalizedPath))) {
+            continue;
+        }
+        const entry = findZipEntry(parsed.zip, normalizedPath);
+        if (!entry || entry.isDirectory) continue;
+        const targetPath = path.join(pkgDir, normalizedPath);
+        ensureParentDir(targetPath);
+        fs.writeFileSync(targetPath, entry.getData());
+    }
+
+    if (removeMissing) {
+        for (const oldFile of existing.files) {
+            const normalizedPath = normalizeRelativePath(oldFile.path).replace(/\/+$/, '');
+            if (!normalizedPath || oldFile.type === 'dll' || oldFile.type === 'folder') continue;
+            if (newInfoByPath.has(normalizedPath.toLowerCase())) continue;
+            if (isPreservedPackagePath(existing, oldFile, preserve)) continue;
+
+            const storagePath = path.join(pkgDir, normalizedPath);
+            removePathIfExists(storagePath);
+            cleanEmptyParents(storagePath, pkgDir);
+
+            if (wasEnabled && (oldFile.type === 'config' || oldFile.type === 'asset')) {
+                removePathIfExists(resolveBepInExRelative(getDeployRelativePath(existing, oldFile)));
+            }
+        }
+        const removedFolders = existing.files
+            .filter((oldFile) => oldFile.type === 'folder')
+            .filter((oldFile) => !newInfoByPath.has(normalizeRelativePath(oldFile.path).replace(/\/+$/, '').toLowerCase()))
+            .filter((oldFile) => !isPreservedPackagePath(existing, oldFile, preserve))
+            .map((oldFile) => getDeployRelativePath(existing, oldFile));
+        if (wasEnabled && removedFolders.length > 0) {
+            tryDeleteFolders(removedFolders, getBepInExDir());
+        }
+    }
+
+    const carriedFiles = removeMissing
+        ? existing.files.filter((file) => isPreservedPackagePath(existing, file, preserve) && !newInfoByPath.has(normalizeRelativePath(file.path).replace(/\/+$/, '').toLowerCase()))
+        : existing.files.filter((file) => !newInfoByPath.has(normalizeRelativePath(file.path).replace(/\/+$/, '').toLowerCase()));
+
+    const carriedDllPaths = existing.dllPaths.filter((oldDllPath) => {
+        const normalized = normalizeRelativePath(oldDllPath);
+        if (newDllPaths.has(normalized.toLowerCase())) return false;
+        return !removeMissing || isPreservedUpdatePath(normalized, preserve);
+    });
+    const nextDllPaths = [
+        ...parsed.dllEntries.map((entry) => normalizeRelativePath(entry.entryName)),
+        ...carriedDllPaths,
+    ].filter((value, index, array) => array.findIndex((item) => item.toLowerCase() === value.toLowerCase()) === index);
+    const nextFiles = uniqueModFiles([...parsed.infoFiles, ...carriedFiles]);
+    const nextMeta: PackageMeta = {
+        ...existing,
+        name: parsed.info.name || existing.name,
+        author: parsed.info.author || existing.author,
+        description: parsed.info.description || existing.description,
+        packageType: parsed.info.packageType || existing.packageType,
+        dllPaths: nextDllPaths,
+        files: nextFiles,
+        enabled: existing.enabled,
+        dependency: sanitizePackageDependency(parsed.info.dependency) ?? existing.dependency,
+        updatePolicy: sanitizeUpdatePolicy(metadata.updatePolicy ?? parsed.info.updatePolicy ?? existing.updatePolicy),
+        version: metadata.version || parsed.info.version || existing.version,
+        source: metadata.source || existing.source,
+    };
+
+    modListFile.packages[packageId] = nextMeta;
+    saveModListFile(modListFile);
+
+    if (wasEnabled) {
+        deployUpdatedPackageFiles(nextMeta, pkgDir, preserve);
+    }
 
     return scanMods();
 }
@@ -1222,6 +1527,7 @@ export function createAndImportPackage(data: {
     packageType: 'collection' | 'single';
     version?: string;
     dependency?: PackageDependency;
+    updatePolicy?: UpdatePolicy;
     files: Array<{ filePath: string; name: string; author: string }>;
 }): ModPackage[] {
     ensureDirs();
@@ -1270,6 +1576,7 @@ export function createAndImportPackage(data: {
         packageType: data.packageType,
         version: data.version,
         dependency: sanitizePackageDependency(data.dependency),
+        updatePolicy: sanitizeUpdatePolicy(data.updatePolicy),
         files: infoFiles,
     };
     zip.addFile('mod-info.json', Buffer.from(JSON.stringify(modInfo, null, 2)));
@@ -1424,6 +1731,7 @@ export function exportPackage(packageId: string, savePath: string): string {
             packageType: packageMeta.packageType,
             version: packageMeta.version,
             dependency: sanitizePackageDependency(packageMeta.dependency),
+            updatePolicy: sanitizeUpdatePolicy(packageMeta.updatePolicy),
             files: exportedFiles,
         };
     } else {
@@ -1484,6 +1792,7 @@ function packModFromSources(data: {
     packageType: 'collection' | 'single';
     version?: string;
     dependency?: PackageDependency;
+    updatePolicy?: UpdatePolicy;
     sources: PackModSource[];
     settingsScript?: ScriptConfig | null;
     savePath: string;
@@ -1592,6 +1901,7 @@ function packModFromSources(data: {
         packageType: data.packageType,
         version: data.version,
         dependency: sanitizePackageDependency(data.dependency),
+        updatePolicy: sanitizeUpdatePolicy(data.updatePolicy),
         files: topInfoFiles,
     };
     if (data.settingsScript) {
@@ -1622,6 +1932,7 @@ export function packMod(data: {
     packageType: 'collection' | 'single';
     version?: string;
     dependency?: PackageDependency;
+    updatePolicy?: UpdatePolicy;
     files: Array<{ filePath: string; name: string; author: string }>;
     sources?: PackModSource[];
     settingsScript?: ScriptConfig | null;
@@ -1637,6 +1948,7 @@ export function packMod(data: {
             packageType: data.packageType,
             version: data.version,
             dependency: sanitizePackageDependency(data.dependency),
+            updatePolicy: sanitizeUpdatePolicy(data.updatePolicy),
             sources: data.sources,
             settingsScript: data.settingsScript,
             savePath: data.savePath,

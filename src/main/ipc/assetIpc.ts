@@ -4,18 +4,23 @@ import {ipcMain} from 'electron';
 import {
     backup,
     clearCurrentAssetPacks,
+    exportAssetCatalogDistribution,
     getCatalogEditorData,
     getAssetCatalog,
+    getAssetCatalogSyncStatus,
     getBackupStatus,
     getCurrentAssetPacks,
     getFontTargets,
+    getMetadataCatalogs,
     getStoredFonts,
     importCatalogPreviewImage,
     importFont,
     restoreBackup,
     saveCatalogEditorData,
     saveCurrentAssetPacks,
-    selectReplacementImage
+    saveMetadataCatalog,
+    selectReplacementImage,
+    syncAssetCatalogFromRemote
 } from '../services/assetService';
 
 export function registerAssetIpc() {
@@ -35,12 +40,32 @@ export function registerAssetIpc() {
         return getAssetCatalog();
     });
 
+    ipcMain.handle('asset:get-catalog-sync-status', () => {
+        return getAssetCatalogSyncStatus();
+    });
+
+    ipcMain.handle('asset:sync-catalog-from-remote', () => {
+        return syncAssetCatalogFromRemote();
+    });
+
     ipcMain.handle('asset:get-catalog-editor-data', () => {
         return getCatalogEditorData();
     });
 
     ipcMain.handle('asset:save-catalog-editor-data', (_event, catalog) => {
         return saveCatalogEditorData(catalog);
+    });
+
+    ipcMain.handle('asset:export-catalog-distribution', () => {
+        return exportAssetCatalogDistribution();
+    });
+
+    ipcMain.handle('asset:get-metadata-catalogs', () => {
+        return getMetadataCatalogs();
+    });
+
+    ipcMain.handle('asset:save-metadata-catalog', (_event, key: string, rows) => {
+        return saveMetadataCatalog(key, rows);
     });
 
     ipcMain.handle('asset:get-current-asset-packs', () => {

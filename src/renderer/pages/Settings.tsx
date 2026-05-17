@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Box, Button, LinearProgress, MenuItem, Select, Stack, TextField, Typography } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SaveIcon from '@mui/icons-material/Save';
@@ -23,6 +24,8 @@ type Props = {
 type AppSettings = Awaited<ReturnType<typeof window.electronAPI.getSettings>>;
 type SupportedGame = Awaited<ReturnType<typeof window.electronAPI.getSupportedGames>>[number];
 type UpdateStatus = Awaited<ReturnType<typeof window.electronAPI.getUpdateStatus>>;
+type RuntimeIntegrityResult = Awaited<ReturnType<typeof window.electronAPI.getRuntimeIntegrityStatus>>;
+type RuntimeIntegrityItem = NonNullable<RuntimeIntegrityResult>['items'][number];
 
 const sectionLabel = {
     color: 'var(--text-color-light)',
@@ -46,6 +49,8 @@ export default function Settings({
     const [gamePath, setGamePath] = useState('');
     const [appVersion, setAppVersion] = useState('');
     const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+    const [runtimeIntegrity, setRuntimeIntegrity] = useState<RuntimeIntegrityResult>(null);
+    const [runtimeChecking, setRuntimeChecking] = useState(false);
 
     useEffect(() => {
         window.electronAPI.getSettings().then((loadedSettings) => {
@@ -55,6 +60,7 @@ export default function Settings({
         window.electronAPI.getSupportedGames().then(setSupportedGames);
         window.electronAPI.getVersion().then(setAppVersion);
         window.electronAPI.getUpdateStatus().then(setUpdateStatus);
+        window.electronAPI.getRuntimeIntegrityStatus().then(setRuntimeIntegrity);
 
         return window.electronAPI.onUpdateStatus(setUpdateStatus);
     }, []);
@@ -120,6 +126,21 @@ export default function Settings({
         const nextStatus = await window.electronAPI.installUpdate();
         setUpdateStatus(nextStatus);
     };
+
+    const handleCheckRuntimeIntegrity = async () => {
+        setRuntimeChecking(true);
+        try {
+            const result = await window.electronAPI.checkRuntimeIntegrity();
+            setRuntimeIntegrity(result);
+        } finally {
+            setRuntimeChecking(false);
+        }
+    };
+
+    const runtimeMissingCount = runtimeIntegrity?.items.filter((item) => item.status === 'missing').length || 0;
+    const runtimeFailedCount = runtimeIntegrity?.items.filter((item) => item.status === 'failed').length || 0;
+    const runtimeAlertSeverity = !runtimeIntegrity ? 'info' : runtimeIntegrity.ok ? 'success' : runtimeFailedCount > 0 ? 'error' : 'warning';
+    const runtimeSummary = getRuntimeSummary(runtimeIntegrity, runtimeChecking, runtimeMissingCount, runtimeFailedCount, currentLanguage);
 
     return (
         <Box sx={{ maxWidth: 760 }}>
@@ -296,6 +317,45 @@ export default function Settings({
                     </Stack>
                 </Stack>
             </Box>
+
+            <Box sx={{ mt: 4 }}>
+                <Typography sx={sectionLabel}>{t('settings.section.runtimeIntegrity', currentLanguage)}</Typography>
+                <Stack spacing={1.5}>
+                    <Alert severity={runtimeAlertSeverity}>
+                        {runtimeSummary}
+                    </Alert>
+
+                    {runtimeIntegrity && (
+                        <Stack spacing={1}>
+                            <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12 }}>
+                                {t('settings.runtime.checkedAt', currentLanguage)} {formatRuntimeCheckedAt(runtimeIntegrity.checkedAt)}
+                            </Typography>
+                            <Box sx={{ display: 'grid', gap: 0.75 }}>
+                                {runtimeIntegrity.items.map((item) => (
+                                    <RuntimeIntegrityRow key={item.id} item={item} language={currentLanguage} />
+                                ))}
+                            </Box>
+                            {!runtimeIntegrity.ok && (
+                                <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12 }}>
+                                    {t('settings.runtime.externalToolsHint', currentLanguage)}
+                                </Typography>
+                            )}
+                        </Stack>
+                    )}
+
+                    <Button
+                        variant="outlined"
+                        startIcon={<FactCheckIcon />}
+                        onClick={handleCheckRuntimeIntegrity}
+                        disabled={runtimeChecking}
+                        sx={{ color: 'var(--text-color)', borderColor: 'var(--border-color)', alignSelf: 'flex-start' }}
+                    >
+                        {runtimeChecking
+                            ? t('settings.runtime.checking', currentLanguage)
+                            : t('settings.button.checkRuntime', currentLanguage)}
+                    </Button>
+                </Stack>
+            </Box>
         </Box>
     );
 }
@@ -321,3 +381,77 @@ const selectSx = {
     '& .MuiOutlinedInput-notchedOutline': { borderColor: 'var(--border-color)' },
     '& .MuiSvgIcon-root': { color: 'var(--text-color)' }
 };
+
+function getRuntimeSummary(
+    integrity: RuntimeIntegrityResult,
+    checking: boolean,
+    missingCount: number,
+    failedCount: number,
+    language: LanguageCode
+) {
+    if (checking) return t('settings.runtime.checking', language);
+    if (!integrity) return t('settings.runtime.notChecked', language);
+    if (integrity.ok) return t('settings.runtime.ok', language);
+    if (failedCount > 0) {
+        return `${t('settings.runtime.failed', language)} ${t('settings.runtime.failedCount', language)} ${failedCount}`;
+    }
+
+    return `${t('settings.runtime.missing', language)} ${t('settings.runtime.missingCount', language)} ${missingCount}`;
+}
+
+function formatRuntimeCheckedAt(value: string) {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) return value;
+
+    return date.toLocaleString();
+}
+
+function RuntimeIntegrityRow({ item, language }: { item: RuntimeIntegrityItem; language: LanguageCode }) {
+    const color = item.status === 'ok' ? 'success.main' : item.status === 'missing' ? 'warning.main' : 'error.main';
+    const statusLabel = item.status === 'ok'
+        ? t('settings.runtime.status.ok', language)
+        : item.status === 'missing'
+            ? t('settings.runtime.status.missing', language)
+            : t('settings.runtime.status.failed', language);
+
+    return (
+        <Box
+            sx={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(160px, 1fr) auto',
+                gap: 1,
+                p: 1,
+                border: '1px solid var(--border-color)',
+                borderRadius: 1,
+                backgroundColor: 'var(--surface-color)'
+            }}
+        >
+            <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ color: 'var(--text-color)', fontWeight: 700, fontSize: 13 }}>
+                    {item.label}
+                </Typography>
+                <Typography
+                    title={item.path}
+                    sx={{
+                        color: 'var(--text-color-light)',
+                        fontSize: 11,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                    }}
+                >
+                    {item.path}
+                </Typography>
+                {item.message && (
+                    <Typography sx={{ color, fontSize: 11, mt: 0.25 }}>
+                        {item.message}
+                    </Typography>
+                )}
+            </Box>
+            <Typography sx={{ color, fontSize: 12, fontWeight: 800, alignSelf: 'center' }}>
+                {statusLabel}
+            </Typography>
+        </Box>
+    );
+}

@@ -62,6 +62,7 @@ import { useDeveloperShortcut } from '../hooks/useDeveloperShortcut';
 import type {
     ModFileType,
     ModPackage,
+    ModUpdatePolicy,
     OnlineModCatalogItem,
     PackageDependency,
     ApplyPackageSettingsChanges,
@@ -127,6 +128,14 @@ const selectMenuProps = {
 };
 
 const FILE_TYPES: ModFileType[] = ['dll', 'asset', 'mod-info', 'script', 'config', 'folder', 'readme'];
+
+function getUpdatePolicyMode(item?: { updatePolicy?: ModUpdatePolicy }): ModUpdatePolicy['mode'] {
+    return item?.updatePolicy?.mode || 'replace-confirm';
+}
+
+function confirmReplaceUpdate(itemName: string): boolean {
+    return window.confirm(`${itemName} 업데이트는 기존 모드를 삭제 후 새로 설치합니다.\n사용자 파일이 보존되지 않을 수 있습니다. 계속할까요?`);
+}
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -206,6 +215,9 @@ type ModDistributionForm = {
     zipPath: string;
     readmeFilePath: string;
     readmePath: string;
+    updatePolicyMode: ModUpdatePolicy['mode'];
+    updatePolicyPreserveText: string;
+    updatePolicyRemoveMissing: boolean;
     downloadPath: string;
     sha256: string;
     gameIdsText: string;
@@ -1847,6 +1859,9 @@ function PackModDialog({
     const [dependencyTarget, setDependencyTarget] = useState('');
     const [dependencyDisplayName, setDependencyDisplayName] = useState('');
     const [dependencyInstallBase, setDependencyInstallBase] = useState('');
+    const [updatePolicyMode, setUpdatePolicyMode] = useState<ModUpdatePolicy['mode']>('replace-confirm');
+    const [updatePolicyPreserveText, setUpdatePolicyPreserveText] = useState('');
+    const [updatePolicyRemoveMissing, setUpdatePolicyRemoveMissing] = useState(false);
     const [packStep, setPackStep] = useState<1 | 2 | 3>(1);
     const [helpOpen, setHelpOpen] = useState(false);
     const [guideText, setGuideText] = useState('');
@@ -1887,6 +1902,9 @@ function PackModDialog({
         setDependencyTarget('');
         setDependencyDisplayName('');
         setDependencyInstallBase('');
+        setUpdatePolicyMode('replace-confirm');
+        setUpdatePolicyPreserveText('');
+        setUpdatePolicyRemoveMissing(false);
         setPackStep(1);
         setHelpOpen(false);
         setSources([]);
@@ -2307,6 +2325,15 @@ function PackModDialog({
         releaseNativeDialogFocus();
     };
 
+    const buildPackUpdatePolicy = (): ModUpdatePolicy => ({
+        mode: updatePolicyMode,
+        preserve: updatePolicyPreserveText
+            .split(/\r?\n|,/)
+            .map((item) => normalizePackPath(item.trim()).replace(/\/+$/, ''))
+            .filter(Boolean),
+        removeMissing: updatePolicyRemoveMissing,
+    });
+
     const handlePack = async () => {
         if (!canLeaveBasicInfo) { setError('패키지 이름, 제작자, 설명을 모두 입력해주세요.'); return; }
         if (sources.length === 0) { setError('Add at least one DLL or ZIP file.'); return; }
@@ -2338,6 +2365,7 @@ function PackModDialog({
                 packageType,
                 version: version.trim() || undefined,
                 dependency,
+                updatePolicy: buildPackUpdatePolicy(),
                 files: [],
                 settingsScript,
                 sources: sources.map((source) => ({
@@ -2726,6 +2754,50 @@ function PackModDialog({
                                 />
                             </Stack>
                         )}
+                    </Box>
+                    <Box sx={{ p: 1.25, border: '1px solid var(--border-color)', borderRadius: 1 }}>
+                        <Typography sx={{ color: 'var(--text-color)', fontWeight: 800, mb: 1 }}>
+                            업데이트 방식
+                        </Typography>
+                        <Stack spacing={1}>
+                            <Select
+                                size="small"
+                                value={updatePolicyMode}
+                                onChange={(e) => setUpdatePolicyMode(e.target.value as ModUpdatePolicy['mode'])}
+                                sx={selectSx}
+                                MenuProps={selectMenuProps}
+                            >
+                                <MenuItem value="replace-confirm">새로 설치 필요 (확인 후 교체)</MenuItem>
+                                <MenuItem value="merge">보존 경로 유지 후 병합</MenuItem>
+                                <MenuItem value="overwrite">단순 덮어쓰기</MenuItem>
+                            </Select>
+                            <Typography sx={{ color: 'var(--text-color-light)', fontSize: 12 }}>
+                                업데이트 정책은 온라인 업데이트 시 적용됩니다. 기존 catalog/ZIP에 없으면 새로 설치 확인 방식으로 동작합니다.
+                            </Typography>
+                            {updatePolicyMode === 'merge' && (
+                                <>
+                                    <TextField
+                                        size="small"
+                                        label="보존 경로"
+                                        value={updatePolicyPreserveText}
+                                        onChange={(e) => setUpdatePolicyPreserveText(e.target.value)}
+                                        helperText="한 줄에 하나씩 입력합니다. 예: config/MyMod.cfg, plugins/ResourceInjector/packs"
+                                        multiline
+                                        minRows={3}
+                                        sx={multilineSx}
+                                    />
+                                    <FormControlLabel
+                                        control={
+                                            <Checkbox
+                                                checked={updatePolicyRemoveMissing}
+                                                onChange={(e) => setUpdatePolicyRemoveMissing(e.target.checked)}
+                                            />
+                                        }
+                                        label={<Typography sx={{ color: 'var(--text-color)' }}>새 ZIP에 없는 비보존 파일 삭제</Typography>}
+                                    />
+                                </>
+                            )}
+                        </Stack>
                     </Box>
                     </>
                     )}
@@ -3584,11 +3656,15 @@ function AddModDialog({
     }, [open, activeTab, onlineLoaded, onlineLoading]);
 
     const handleOnlineAction = async (item: OnlineModCatalogItem) => {
+        const isUpdate = item.installed && item.updateAvailable;
+        if (isUpdate && getUpdatePolicyMode(item) === 'replace-confirm' && !confirmReplaceUpdate(item.name)) {
+            return;
+        }
         setOnlineWorkingId(item.id);
         setOnlineError('');
         try {
-            const result = item.installed && item.updateAvailable
-                ? await window.electronAPI.updateOnlineMod(item)
+            const result = isUpdate
+                ? await window.electronAPI.updateOnlineMod(item, getUpdatePolicyMode(item) === 'replace-confirm')
                 : await window.electronAPI.downloadOnlineMod(item);
             onImport(result as ModPackage[], item.name);
             setOnlineMods(await window.electronAPI.getOnlineModCatalog());
@@ -4177,6 +4253,9 @@ const emptyDistributionForm = (): ModDistributionForm => ({
     zipPath: '',
     readmeFilePath: '',
     readmePath: '',
+    updatePolicyMode: 'replace-confirm',
+    updatePolicyPreserveText: '',
+    updatePolicyRemoveMissing: false,
     downloadPath: '',
     sha256: '',
     gameIdsText: 'long-yin-li-zhi-zhuan',
@@ -4192,6 +4271,9 @@ function distributionFormFromItem(item: OnlineModCatalogItem): ModDistributionFo
         zipPath: '',
         readmeFilePath: '',
         readmePath: item.readmePath || '',
+        updatePolicyMode: item.updatePolicy?.mode || 'replace-confirm',
+        updatePolicyPreserveText: (item.updatePolicy?.preserve || []).join('\n'),
+        updatePolicyRemoveMissing: item.updatePolicy?.removeMissing === true,
         downloadPath: item.downloadPath,
         sha256: item.sha256 || '',
         gameIdsText: (item.gameIds || []).join(', '),
@@ -4348,6 +4430,14 @@ function ModDistributionDialog({
                 zipPath: form.zipPath || undefined,
                 readmeFilePath: form.readmeFilePath || undefined,
                 readmePath: form.readmePath || undefined,
+                updatePolicy: {
+                    mode: form.updatePolicyMode,
+                    preserve: form.updatePolicyPreserveText
+                        .split(/\r?\n|,/)
+                        .map((item) => normalizePackPath(item.trim()).replace(/\/+$/, ''))
+                        .filter(Boolean),
+                    removeMissing: form.updatePolicyRemoveMissing,
+                },
                 downloadPath: form.downloadPath || undefined,
                 sha256: form.sha256 || undefined,
                 gameIds: parseGameIds(form.gameIdsText),
@@ -4507,6 +4597,47 @@ function ModDistributionDialog({
                                 helperText="쉼표 또는 줄바꿈으로 구분합니다. 용윤입지전: long-yin-li-zhi-zhuan"
                                 sx={inputSx}
                             />
+                            <Box sx={{ p: 1.25, border: '1px solid var(--border-color)', borderRadius: 1 }}>
+                                <Typography sx={{ color: 'var(--text-color)', fontWeight: 800, mb: 1 }}>
+                                    업데이트 정책
+                                </Typography>
+                                <Stack spacing={1}>
+                                    <Select
+                                        size="small"
+                                        value={form.updatePolicyMode}
+                                        onChange={(e) => updateForm({ updatePolicyMode: e.target.value as ModUpdatePolicy['mode'] })}
+                                        sx={selectSx}
+                                        MenuProps={selectMenuProps}
+                                    >
+                                        <MenuItem value="replace-confirm">새로 설치 필요 (확인 후 교체)</MenuItem>
+                                        <MenuItem value="merge">보존 경로 유지 후 병합</MenuItem>
+                                        <MenuItem value="overwrite">단순 덮어쓰기</MenuItem>
+                                    </Select>
+                                    {form.updatePolicyMode === 'merge' && (
+                                        <>
+                                            <TextField
+                                                size="small"
+                                                label="보존 경로"
+                                                value={form.updatePolicyPreserveText}
+                                                onChange={(e) => updateForm({ updatePolicyPreserveText: e.target.value })}
+                                                helperText="한 줄에 하나씩 입력합니다. 예: config/MyMod.cfg, plugins/ResourceInjector/packs"
+                                                multiline
+                                                minRows={3}
+                                                sx={multilineSx}
+                                            />
+                                            <FormControlLabel
+                                                control={
+                                                    <Checkbox
+                                                        checked={form.updatePolicyRemoveMissing}
+                                                        onChange={(e) => updateForm({ updatePolicyRemoveMissing: e.target.checked })}
+                                                    />
+                                                }
+                                                label={<Typography sx={{ color: 'var(--text-color)' }}>새 ZIP에 없는 비보존 파일 삭제</Typography>}
+                                            />
+                                        </>
+                                    )}
+                                </Stack>
+                            </Box>
                             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                                 <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={handleSelectZip} sx={{ borderColor: 'var(--border-color)', color: 'var(--text-color)' }}>
                                     ZIP 선택
@@ -4688,9 +4819,13 @@ export default function ModManager() {
     const handlePackageUpdate = async (pkg: ModPackage) => {
         const item = getCatalogItemForPackage(pkg);
         if (!item) return;
+        const policyMode = getUpdatePolicyMode(item.updatePolicy ? item : pkg);
+        if (policyMode === 'replace-confirm' && !confirmReplaceUpdate(pkg.name)) {
+            return;
+        }
         setUpdatingPackageId(pkg.id);
         try {
-            const result = await window.electronAPI.updateOnlineMod(item);
+            const result = await window.electronAPI.updateOnlineMod(item, policyMode === 'replace-confirm');
             setPackages(result as ModPackage[]);
             setOnlineCatalog(await window.electronAPI.getOnlineModCatalog());
             showNotification(`모드 업데이트 완료: ${pkg.name}`);

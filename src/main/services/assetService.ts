@@ -3,12 +3,17 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { getAppSettings, readJsonFile, writeJsonFile } from './configService';
 import { getBundledStoragePath, getConfigPath, getResourcePath, getStoragePath, getWritableConfigDir } from './runtimePaths';
 
 const CONFIG_PATH = getConfigPath('asset_config.json');
 const BACKUP_ROOT = getStoragePath('backups');
 const ASSET_CATALOG_PATH = getConfigPath('asset_catalog.json');
+const ASSET_CATALOG_BASE_URL =
+    'https://raw.githubusercontent.com/EvanHexX/HexX_Forge_Unity/main';
+const ASSET_CATALOG_INDEX_URL = `${ASSET_CATALOG_BASE_URL}/asset-catalog/index.json`;
+const ASSET_CATALOG_DISTRIBUTION_ROOT = path.join(process.cwd(), 'asset-catalog');
 const TEXTURE_CATALOG_PATH = getConfigPath('texture_catalog.csv');
 const CURRENT_FONTS_PATH = getConfigPath('current_fonts.json');
 const CURRENT_ASSET_PACKS_PATH = getConfigPath('current_asset_packs.json');
@@ -22,6 +27,24 @@ const FONT_TARGET_IDS = Array.from({ length: 13 }, (_, index) => 2418 + index);
 const FONT_STORAGE_DIR = getStoragePath('fonts');
 const BUNDLED_FONT_STORAGE_DIR = getBundledStoragePath('fonts');
 const FONT_EXTENSIONS = new Set(['.ttf', '.otf', '.ttc', '.fontdata']);
+const METADATA_CATALOGS = [
+    {
+        key: 'texture-data',
+        label: 'metadata/data.tsv',
+        description: '기존 의상/texture patch metadata',
+        relativePath: ['tools', 'AssetManager', 'metadata', 'data.tsv'],
+        columns: ['category', 'gender', 'type', 'texture_name', 'pathID', 'size', 'atlas_name', 'atlas_pathID', 'format'],
+        requiredColumns: ['category', 'gender', 'type', 'texture_name', 'pathID', 'size', 'format']
+    },
+    {
+        key: 'ui-textures',
+        label: 'metadata/ui_textures.tsv',
+        description: 'UI Texture2D patch metadata',
+        relativePath: ['tools', 'AssetManager', 'metadata', 'ui_textures.tsv'],
+        columns: ['category', 'group', 'display_name', 'texture_name', 'pathID', 'width', 'height', 'format', 'assets_file', 'flip_y'],
+        requiredColumns: ['category', 'group', 'display_name', 'texture_name', 'pathID', 'width', 'height', 'format', 'assets_file', 'flip_y']
+    }
+] as const;
 
 type SizeTuple = [number, number];
 
@@ -48,6 +71,7 @@ type AssetCatalogItem = {
     pathId: number;
     size?: SizeTuple;
     preview?: string;
+    previewSha256?: string;
 };
 
 type AssetConfig = {
@@ -103,7 +127,59 @@ type FontListItem = {
 
 type AssetCatalogFile = {
     schemaVersion?: number;
+    catalogVersion?: string;
+    updatedAt?: string;
     items: AssetCatalogItem[];
+};
+
+type MetadataCatalogDefinition = typeof METADATA_CATALOGS[number];
+
+export type MetadataCatalogRow = {
+    rowId?: string;
+    values: Record<string, string>;
+};
+
+export type MetadataCatalogData = {
+    key: string;
+    label: string;
+    description: string;
+    path: string;
+    columns: string[];
+    requiredColumns: string[];
+    rows: MetadataCatalogRow[];
+};
+
+type RemoteAssetCatalogFile = {
+    schemaVersion: number;
+    catalogVersion?: string;
+    updatedAt?: string;
+    items: AssetCatalogItem[];
+};
+
+export type AssetCatalogSyncStatus = {
+    ok: boolean;
+    checkedAt: string;
+    updateAvailable: boolean;
+    currentVersion: string;
+    currentUpdatedAt: string;
+    remoteVersion?: string;
+    remoteUpdatedAt?: string;
+    itemCount: number;
+    remoteItemCount?: number;
+    error?: string;
+};
+
+export type AssetCatalogSyncResult = {
+    status: AssetCatalogSyncStatus;
+    catalog: ReturnType<typeof getAssetCatalog>;
+    warnings: string[];
+};
+
+export type AssetCatalogDistributionResult = {
+    indexPath: string;
+    previewCount: number;
+    catalogVersion: string;
+    itemCount: number;
 };
 
 type CurrentAssetPackEntry = {
@@ -171,6 +247,147 @@ function readAssetCatalogFile(): AssetCatalogFile {
         ...catalog,
         items: (catalog.items || []).map(normalizeCatalogItem)
     };
+}
+
+function writeAssetCatalogFile(catalog: AssetCatalogFile): void {
+    writeJsonFile(ASSET_CATALOG_PATH, catalog);
+}
+
+function normalizeRemotePath(value: string): string {
+    const normalized = path.posix.normalize(value.replaceAll('\\', '/').replace(/^\/+/, ''));
+
+    if (!normalized || normalized === '.' || normalized.startsWith('../') || normalized.includes('/../')) {
+        throw new Error(`원격 catalog 경로가 올바르지 않습니다: ${value}`);
+    }
+
+    return normalized;
+}
+
+function hashBuffer(buffer: Buffer): string {
+    return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+function hashFile(filePath: string): string {
+    return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function getCatalogVersion(catalog: Pick<AssetCatalogFile, 'catalogVersion' | 'updatedAt'>): string {
+    return String(catalog.catalogVersion || catalog.updatedAt || '');
+}
+
+function compareCatalogVersion(localCatalog: AssetCatalogFile, remoteCatalog: RemoteAssetCatalogFile): boolean {
+    const localVersion = getCatalogVersion(localCatalog);
+    const remoteVersion = getCatalogVersion(remoteCatalog);
+
+    if (!remoteVersion) {
+        return false;
+    }
+
+    return localVersion !== remoteVersion;
+}
+
+async function fetchRemoteAssetCatalog(): Promise<RemoteAssetCatalogFile> {
+    const response = await fetch(ASSET_CATALOG_INDEX_URL, {
+        headers: {
+            accept: 'application/json',
+            'user-agent': 'HexX-Forge'
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error(`온라인 asset catalog 요청 실패: ${response.status}`);
+    }
+
+    const remoteCatalog = (await response.json()) as RemoteAssetCatalogFile;
+    if (!remoteCatalog || remoteCatalog.schemaVersion !== 1 || !Array.isArray(remoteCatalog.items)) {
+        throw new Error('온라인 asset catalog 형식이 올바르지 않습니다.');
+    }
+
+    return {
+        ...remoteCatalog,
+        items: remoteCatalog.items.map((item, index) => validateCatalogItem(item, index))
+    };
+}
+
+function buildCatalogSyncStatus(
+    localCatalog: AssetCatalogFile,
+    remoteCatalog: RemoteAssetCatalogFile,
+    ok = true,
+    error = ''
+): AssetCatalogSyncStatus {
+    return {
+        ok,
+        checkedAt: new Date().toISOString(),
+        updateAvailable: ok ? compareCatalogVersion(localCatalog, remoteCatalog) : false,
+        currentVersion: getCatalogVersion(localCatalog),
+        currentUpdatedAt: localCatalog.updatedAt || '',
+        remoteVersion: getCatalogVersion(remoteCatalog),
+        remoteUpdatedAt: remoteCatalog.updatedAt || '',
+        itemCount: localCatalog.items.length,
+        remoteItemCount: remoteCatalog.items.length,
+        error: error || undefined
+    };
+}
+
+function mergeRemoteCatalogItems(localItems: AssetCatalogItem[], remoteItems: AssetCatalogItem[]): AssetCatalogItem[] {
+    const merged = new Map<string, AssetCatalogItem>();
+
+    for (const item of localItems) {
+        if (item.id) merged.set(item.id, normalizeCatalogItem(item));
+    }
+
+    for (const item of remoteItems) {
+        if (item.id) merged.set(item.id, normalizeCatalogItem(item));
+    }
+
+    return [...merged.values()].sort((a, b) => {
+        const categoryCompare = (a.category || '').localeCompare(b.category || '', 'ko-KR');
+        if (categoryCompare !== 0) return categoryCompare;
+        return (a.displayLabel || a.label || a.id).localeCompare(b.displayLabel || b.label || b.id, 'ko-KR');
+    });
+}
+
+function resolveLocalPreviewPath(relativePath: string): string {
+    const safePath = normalizeRemotePath(relativePath);
+    const candidates = [
+        path.join(getWritableConfigDir(), safePath),
+        path.join(process.cwd(), safePath),
+        path.join(process.cwd(), 'config', safePath)
+    ];
+
+    return candidates.find((candidate) => fs.existsSync(candidate)) || '';
+}
+
+async function downloadRemotePreview(item: AssetCatalogItem): Promise<{ item: AssetCatalogItem; warning?: string }> {
+    if (!item.preview) {
+        return { item };
+    }
+
+    const previewPath = normalizeRemotePath(item.preview);
+    const response = await fetch(`${ASSET_CATALOG_BASE_URL}/${previewPath}`, {
+        headers: { 'user-agent': 'HexX-Forge' }
+    });
+
+    if (!response.ok) {
+        return {
+            item: { ...item, preview: '', previewSha256: undefined },
+            warning: `${item.id}: preview 다운로드 실패(${response.status})`
+        };
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (item.previewSha256 && hashBuffer(buffer).toLowerCase() !== item.previewSha256.toLowerCase()) {
+        return {
+            item: { ...item, preview: '', previewSha256: undefined },
+            warning: `${item.id}: preview sha256 값이 일치하지 않습니다.`
+        };
+    }
+
+    const targetPath = path.join(getWritableConfigDir(), previewPath);
+    ensureDir(path.dirname(targetPath));
+    fs.writeFileSync(targetPath, buffer);
+
+    return { item: { ...item, preview: previewPath } };
 }
 
 /**
@@ -289,11 +506,108 @@ export function saveCatalogEditorData(catalog: AssetCatalogFile) {
     const nextCatalog: AssetCatalogFile = {
         ...catalog,
         schemaVersion: Math.max(2, Number(catalog.schemaVersion || 2)),
+        updatedAt: catalog.updatedAt || new Date().toISOString(),
         items
     };
 
-    writeJsonFile(ASSET_CATALOG_PATH, nextCatalog);
+    writeAssetCatalogFile(nextCatalog);
     return getAssetCatalog();
+}
+
+export async function getAssetCatalogSyncStatus(): Promise<AssetCatalogSyncStatus> {
+    const localCatalog = readAssetCatalogFile();
+
+    try {
+        const remoteCatalog = await fetchRemoteAssetCatalog();
+        return buildCatalogSyncStatus(localCatalog, remoteCatalog);
+    } catch (error) {
+        return {
+            ok: false,
+            checkedAt: new Date().toISOString(),
+            updateAvailable: false,
+            currentVersion: getCatalogVersion(localCatalog),
+            currentUpdatedAt: localCatalog.updatedAt || '',
+            itemCount: localCatalog.items.length,
+            error: error instanceof Error ? error.message : '온라인 asset catalog 상태 확인에 실패했습니다.'
+        };
+    }
+}
+
+export async function syncAssetCatalogFromRemote(): Promise<AssetCatalogSyncResult> {
+    const localCatalog = readAssetCatalogFile();
+    const remoteCatalog = await fetchRemoteAssetCatalog();
+    const warnings: string[] = [];
+    const downloadedRemoteItems: AssetCatalogItem[] = [];
+
+    for (const item of remoteCatalog.items) {
+        const result = await downloadRemotePreview(item);
+        downloadedRemoteItems.push(result.item);
+        if (result.warning) warnings.push(result.warning);
+    }
+
+    const nextCatalog: AssetCatalogFile = {
+        schemaVersion: 2,
+        catalogVersion: getCatalogVersion(remoteCatalog),
+        updatedAt: remoteCatalog.updatedAt || new Date().toISOString(),
+        items: mergeRemoteCatalogItems(localCatalog.items, downloadedRemoteItems)
+    };
+
+    writeAssetCatalogFile(nextCatalog);
+
+    return {
+        status: buildCatalogSyncStatus(nextCatalog, remoteCatalog),
+        catalog: getAssetCatalog(),
+        warnings
+    };
+}
+
+export function exportAssetCatalogDistribution(): AssetCatalogDistributionResult {
+    const catalog = readAssetCatalogFile();
+    const now = new Date();
+    const catalogVersion = now.toISOString().replace(/[:.]/g, '-');
+    const updatedAt = now.toISOString();
+    let previewCount = 0;
+
+    ensureDir(ASSET_CATALOG_DISTRIBUTION_ROOT);
+
+    const items = catalog.items.map((item, index) => {
+        const normalized = validateCatalogItem(item, index);
+        if (!normalized.preview) return normalized;
+
+        const sourcePath = resolveLocalPreviewPath(normalized.preview);
+        if (!sourcePath) return { ...normalized, preview: '' };
+
+        const category = sanitizePathSegment(normalized.category || normalized.type || 'uncategorized');
+        const id = sanitizePathSegment(normalized.id);
+        const remotePreview = path.posix.join('asset-catalog', 'previews', category, `${id}_preview.png`);
+        const targetPath = path.join(process.cwd(), remotePreview);
+
+        ensureDir(path.dirname(targetPath));
+        fs.copyFileSync(sourcePath, targetPath);
+        previewCount += 1;
+
+        return {
+            ...normalized,
+            preview: remotePreview,
+            previewSha256: hashFile(targetPath)
+        };
+    });
+
+    const index = {
+        schemaVersion: 1,
+        catalogVersion,
+        updatedAt,
+        items
+    };
+    const indexPath = path.join(ASSET_CATALOG_DISTRIBUTION_ROOT, 'index.json');
+    fs.writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`, 'utf-8');
+
+    return {
+        indexPath,
+        previewCount,
+        catalogVersion,
+        itemCount: items.length
+    };
 }
 
 export function getCurrentAssetPacks(): CurrentAssetPacksFile {
@@ -421,6 +735,129 @@ function ensureDir(p: string) {
     if (!fs.existsSync(p)) {
         fs.mkdirSync(p, { recursive: true });
     }
+}
+
+function resolveMetadataCatalogPath(definition: MetadataCatalogDefinition): string {
+    return getResourcePath(...definition.relativePath);
+}
+
+function parseTsv(text: string, definition: MetadataCatalogDefinition): MetadataCatalogRow[] {
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+    const header = (lines.shift() || '').split('\t').map((column) => column.trim());
+    const columns = header.length > 1 ? header : [...definition.columns];
+
+    return lines
+        .map((line, index) => ({ line, index }))
+        .filter(({ line }) => line.trim())
+        .map(({ line, index }) => {
+            const parts = line.split('\t');
+            const values: Record<string, string> = {};
+
+            for (const column of definition.columns) {
+                const sourceIndex = columns.indexOf(column);
+                values[column] = sourceIndex >= 0 ? (parts[sourceIndex] || '').trim() : '';
+            }
+
+            return {
+                rowId: `${definition.key}_${index}_${values.pathID || index}`,
+                values
+            };
+        });
+}
+
+function formatTsv(definition: MetadataCatalogDefinition, rows: MetadataCatalogRow[]): string {
+    const lines = [
+        definition.columns.join('\t'),
+        ...rows.map((row) => definition.columns.map((column) => row.values[column] || '').join('\t'))
+    ];
+
+    return `${lines.join('\n')}\n`;
+}
+
+function getMetadataCatalogDefinition(key: string): MetadataCatalogDefinition {
+    const definition = METADATA_CATALOGS.find((item) => item.key === key);
+    if (!definition) {
+        throw new Error(`지원하지 않는 metadata catalog입니다: ${key}`);
+    }
+    return definition;
+}
+
+function validateMetadataCatalogRows(definition: MetadataCatalogDefinition, rows: MetadataCatalogRow[]): MetadataCatalogRow[] {
+    return rows.map((row, index) => {
+        const values: Record<string, string> = {};
+
+        for (const column of definition.columns) {
+            values[column] = String(row.values?.[column] || '').trim();
+        }
+
+        for (const column of definition.requiredColumns) {
+            if (!values[column]) {
+                throw new Error(`${definition.label} ${index + 1}번째 행의 ${column} 값이 없습니다.`);
+            }
+        }
+
+        if (!Number.isFinite(Number(values.pathID))) {
+            throw new Error(`${definition.label} ${index + 1}번째 행의 pathID 값이 올바르지 않습니다.`);
+        }
+
+        if (definition.key === 'texture-data') {
+            const [width, height] = values.size.split(',').map((value) => Number(value.trim()));
+            if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+                throw new Error(`${definition.label} ${index + 1}번째 행의 size 값은 width,height 형식이어야 합니다.`);
+            }
+            if (values.atlas_pathID && !Number.isFinite(Number(values.atlas_pathID))) {
+                throw new Error(`${definition.label} ${index + 1}번째 행의 atlas_pathID 값이 올바르지 않습니다.`);
+            }
+        }
+
+        if (definition.key === 'ui-textures') {
+            for (const column of ['width', 'height']) {
+                if (!Number.isFinite(Number(values[column])) || Number(values[column]) <= 0) {
+                    throw new Error(`${definition.label} ${index + 1}번째 행의 ${column} 값이 올바르지 않습니다.`);
+                }
+            }
+            const flipY = values.flip_y.toLowerCase();
+            if (!['true', 'false'].includes(flipY)) {
+                throw new Error(`${definition.label} ${index + 1}번째 행의 flip_y 값은 true 또는 false여야 합니다.`);
+            }
+            values.flip_y = flipY;
+        }
+
+        return {
+            rowId: row.rowId || `${definition.key}_${index}_${values.pathID || index}`,
+            values
+        };
+    });
+}
+
+export function getMetadataCatalogs(): MetadataCatalogData[] {
+    return METADATA_CATALOGS.map((definition) => {
+        const filePath = resolveMetadataCatalogPath(definition);
+        const text = fs.existsSync(filePath)
+            ? fs.readFileSync(filePath, 'utf-8')
+            : `${definition.columns.join('\t')}\n`;
+
+        return {
+            key: definition.key,
+            label: definition.label,
+            description: definition.description,
+            path: filePath,
+            columns: [...definition.columns],
+            requiredColumns: [...definition.requiredColumns],
+            rows: parseTsv(text, definition)
+        };
+    });
+}
+
+export function saveMetadataCatalog(key: string, rows: MetadataCatalogRow[]): MetadataCatalogData {
+    const definition = getMetadataCatalogDefinition(key);
+    const filePath = resolveMetadataCatalogPath(definition);
+    const nextRows = validateMetadataCatalogRows(definition, rows);
+
+    ensureDir(path.dirname(filePath));
+    fs.writeFileSync(filePath, formatTsv(definition, nextRows), 'utf-8');
+
+    return getMetadataCatalogs().find((catalog) => catalog.key === key)!;
 }
 
 function clearDir(dirPath: string): void {

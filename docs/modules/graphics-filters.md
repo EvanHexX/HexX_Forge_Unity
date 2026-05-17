@@ -99,16 +99,12 @@ Color Grading keeps the Shotcut `Shadows (Lift)`, `Midtones (Gamma)`, and `Highl
 
 ## Runtime Assets
 
-Required frei0r files are copied to `resources/tools/frei0r`.
+Required frei0r files are copied to `resources/tools/frei0r` in local/release environments. The DLL files are external runtime binaries and are not stored in Git; setup notes live in `resources/tools/frei0r/README.md`.
 
 - `filter/select0r.dll`
 - `filter/keyspillm0pup.dll`
 - `filter/alpha0ps_alpha0ps.dll`
 - `filter/saturat0r.dll`
-- `LICENSE.txt`
-- `README.txt`
-- `VERSION.txt`
-
 The main process sets `FREI0R_PATH` to `resources/tools/frei0r/filter` when running FFmpeg.
 
 ## Validation

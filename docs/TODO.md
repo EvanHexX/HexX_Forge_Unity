@@ -22,6 +22,7 @@
 
 - UI 타이틀 / UI 메인배경 실제 적용 전 `scripts/verify-release.mjs`의 `ui_textures.tsv` release packaging 검증이 통과하는지 확인한다.
 - 온라인 어셋팩 catalog는 `asset-packs/index.json`을 사용한다. GitHub raw 반영 전에는 앱 온라인 탭에서 빈 목록 또는 404가 보일 수 있으므로 배포 파일 커밋/push 후 확인한다.
+- 앱 전체 업데이트 없이 원본 대상 catalog를 추가하려면 `asset-catalog/index.json`과 `asset-catalog/previews/...`를 커밋/push한 뒤 Asset Manager의 `Catalog 동기화`를 사용한다.
 - Catalog Editor는 v2 최소 편집 기능만 제공한다. pack.json 생성/수정 wizard와 metadata 자동 동기화는 후속 작업으로 검토한다.
 - 어셋팩 배포 도구는 PNG별 target 입력으로 pack.json/ZIP을 생성한다. 추후 대상 metadata를 UnityPy TSV에서 자동 제안하는 기능을 검토한다.
 - UI가 아닌 신규 asset patch API를 추가할 때는 `ui_textures.tsv`에 섞지 말고 별도 UnityPy metadata 파일, plan kind, Electron routing, 문서 표를 함께 추가한다.
@@ -53,18 +54,8 @@ When all existing renderer surfaces are checked, replace this migration checklis
 
 ## Release Runtime Resource Check
 
-- Before the next Graphics Tool release, add a startup or Graphics Tool entry health check for required runtime files:
-  - `resources/tools/ffmpeg/ffmpeg.exe`
-  - `resources/tools/ffmpeg/ffprobe.exe`
-  - `resources/tools/frei0r/filter/select0r.dll`
-  - `resources/tools/frei0r/filter/keyspillm0pup.dll`
-  - `resources/tools/frei0r/filter/alpha0ps_alpha0ps.dll`
-  - `resources/tools/frei0r/filter/saturat0r.dll`
-- The check must include real FFmpeg validation, not only file existence:
-  - `ffmpeg -filters` contains `frei0r`.
-  - A short `frei0r=select0r` dry-run can load the plugin from the packaged resource path.
-- If the health check fails, disable the affected Graphics Tool frei0r filters and show a `NotificationContext` warning with a short message.
-- The warning should carry copyable diagnostic text containing `ffmpegPath`, `frei0rPath`, missing files, failed dry-run output, and whether `FREI0R_PATH` / `PATH` include the plugin directory.
+- [x] Settings 런타임 파일 점검에서 필수 FFmpeg/frei0r/AssetManager 파일 존재와 FFmpeg `frei0r` dry-run 결과를 표시한다.
+- [x] packaged build에서는 app version이 바뀐 첫 실행 시 `runtime_integrity.json`에 자동 점검 결과를 저장한다.
 - For a later minor version, add `resources/manifest.json` with SHA-256 entries for required runtime files and verify the manifest after update installation or first launch after update.
 
 ## NotificationContext

@@ -115,8 +115,11 @@ export type AssetPackDistributionTargetInput = {
     textureName: string;
     pathId: number;
     size?: SizeTuple;
-    pngPath: string;
+    pngPath?: string;
     previewPath?: string;
+    existingZipPath?: string;
+    existingPng?: string;
+    existingPreview?: string;
 };
 
 export type AssetPackDistributionResult = {
@@ -124,6 +127,15 @@ export type AssetPackDistributionResult = {
     indexPath: string;
     zipPath: string;
     thumbnailPath?: string;
+};
+
+export type AssetPackDistributionCatalogItem = OnlineAssetPackCatalogItem & {
+    zipPath: string;
+    thumbnailFilePath?: string;
+    pack?: AssetPackRaw;
+    broken?: boolean;
+    brokenReason?: string;
+    missingFiles?: string[];
 };
 
 function ensureDir(dirPath: string): void {
@@ -164,6 +176,52 @@ function compareVersions(a: string, b: string): number {
 
 function hashFile(filePath: string): string {
     return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function isWorkspaceTempDirName(name: string): boolean {
+    return name === '__pack_staging' || name.startsWith('__tmp-');
+}
+
+function cleanupDistributionTempDirs(rootDir = DISTRIBUTION_ROOT): void {
+    const packagesDir = path.join(rootDir, 'packages');
+
+    for (const root of [rootDir, packagesDir]) {
+        if (!fs.existsSync(root)) continue;
+
+        for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+            if (entry.isDirectory() && isWorkspaceTempDirName(entry.name)) {
+                fs.rmSync(path.join(root, entry.name), { recursive: true, force: true });
+            }
+        }
+    }
+
+    if (!fs.existsSync(packagesDir)) return;
+
+    const stack = [packagesDir];
+    while (stack.length) {
+        const current = stack.pop()!;
+        for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+            const entryPath = path.join(current, entry.name);
+            if (!entry.isDirectory()) continue;
+
+            if (isWorkspaceTempDirName(entry.name)) {
+                fs.rmSync(entryPath, { recursive: true, force: true });
+            } else {
+                stack.push(entryPath);
+            }
+        }
+    }
+}
+
+function cleanupEmptyDistributionDirs(): void {
+    const packagesRoot = path.join(DISTRIBUTION_ROOT, 'packages');
+    const thumbnailsRoot = path.join(DISTRIBUTION_ROOT, 'thumbnails');
+
+    for (const dirPath of [packagesRoot, thumbnailsRoot]) {
+        if (fs.existsSync(dirPath) && fs.readdirSync(dirPath).length === 0) {
+            fs.rmSync(dirPath, { recursive: true, force: true });
+        }
+    }
 }
 
 function toAssetPackProtocolUrl(packId: string, relativePath: string): string {
@@ -407,6 +465,28 @@ function writeThumbnail(sourcePath: string, targetPath: string): void {
         height: Math.max(1, Math.round(size.height * scale)),
         quality: 'best'
     });
+    ensureDir(path.dirname(targetPath));
+    fs.writeFileSync(targetPath, resized.toPNG());
+}
+
+function writeThumbnailFromBuffer(buffer: Buffer, targetPath: string): void {
+    const image = nativeImage.createFromBuffer(buffer);
+    if (image.isEmpty()) {
+        throw new Error('thumbnail PNG를 읽을 수 없습니다.');
+    }
+
+    const size = image.getSize();
+    const scale = Math.min(
+        THUMBNAIL_MAX_SIZE.width / Math.max(size.width, 1),
+        THUMBNAIL_MAX_SIZE.height / Math.max(size.height, 1),
+        1
+    );
+    const resized = image.resize({
+        width: Math.max(1, Math.round(size.width * scale)),
+        height: Math.max(1, Math.round(size.height * scale)),
+        quality: 'best'
+    });
+    ensureDir(path.dirname(targetPath));
     fs.writeFileSync(targetPath, resized.toPNG());
 }
 
@@ -429,77 +509,188 @@ function copyPackSourceFile(sourcePath: string, destinationPath: string): void {
     fs.copyFileSync(sourcePath, destinationPath);
 }
 
-function buildPackZipFromTargets(input: AssetPackDistributionInput, packageDir: string, id: string, version: string): string {
+function copyZipEntry(zipPath: string, entryName: string, destinationPath: string): void {
+    if (!fs.existsSync(zipPath)) {
+        throw new Error(`기존 어셋팩 ZIP을 찾을 수 없습니다: ${zipPath}`);
+    }
+
+    const zip = new AdmZip(zipPath);
+    const entry = zip.getEntry(entryName);
+    if (!entry || entry.isDirectory) {
+        throw new Error(`기존 어셋팩 ZIP 안에서 파일을 찾을 수 없습니다: ${entryName}`);
+    }
+
+    ensureDir(path.dirname(destinationPath));
+    fs.writeFileSync(destinationPath, entry.getData());
+}
+
+function getZipEntryBuffer(zipPath: string, entryName: string): Buffer {
+    if (!fs.existsSync(zipPath)) {
+        throw new Error(`기존 어셋팩 ZIP을 찾을 수 없습니다: ${zipPath}`);
+    }
+
+    const zip = new AdmZip(zipPath);
+    const entry = zip.getEntry(entryName);
+    if (!entry || entry.isDirectory) {
+        throw new Error(`기존 어셋팩 ZIP 안에서 파일을 찾을 수 없습니다: ${entryName}`);
+    }
+
+    return entry.getData();
+}
+
+function buildPackZipFromTargets(input: AssetPackDistributionInput, workDir: string, id: string, version: string): string {
     const targets = input.targets ?? [];
     if (targets.length === 0) {
         throw new Error('배포할 PNG target을 추가하세요.');
     }
 
-    const stagingDir = path.join(packageDir, '__pack_staging');
+    const stagingDir = path.join(workDir, '__pack_staging');
     fs.rmSync(stagingDir, { recursive: true, force: true });
     ensureDir(stagingDir);
 
-    const packTargets: AssetPackTargetRaw[] = targets.map((target, index) => {
-        const category = target.category?.trim() || '';
-        const option1 = target.option1?.trim() || target.gender?.trim() || '';
-        const catalogId = target.catalogId?.trim() || '';
-        const textureName = target.textureName?.trim() || '';
-        const pathId = Number(target.pathId);
+    try {
+        const packTargets: AssetPackTargetRaw[] = targets.map((target, index) => {
+            const category = target.category?.trim() || '';
+            const option1 = target.option1?.trim() || target.gender?.trim() || '';
+            const catalogId = target.catalogId?.trim() || '';
+            const textureName = target.textureName?.trim() || '';
+            const pathId = Number(target.pathId);
 
-        if (!catalogId) throw new Error(`${index + 1}번째 PNG: catalogId가 없습니다.`);
-        if (!category) throw new Error(`${index + 1}번째 PNG: category가 없습니다.`);
-        if (!option1) throw new Error(`${index + 1}번째 PNG: 대상 구분(option1)이 없습니다.`);
-        if (!textureName) throw new Error(`${index + 1}번째 PNG: textureName이 없습니다.`);
-        if (!Number.isFinite(pathId)) throw new Error(`${index + 1}번째 PNG: pathId가 올바르지 않습니다.`);
-        if (!target.pngPath || !fs.existsSync(target.pngPath)) throw new Error(`${index + 1}번째 PNG 파일을 찾을 수 없습니다.`);
+            if (!catalogId) throw new Error(`${index + 1}번째 PNG: catalogId가 없습니다.`);
+            if (!category) throw new Error(`${index + 1}번째 PNG: category가 없습니다.`);
+            if (!option1) throw new Error(`${index + 1}번째 PNG: 대상 구분(option1)이 없습니다.`);
+            if (!textureName) throw new Error(`${index + 1}번째 PNG: textureName이 없습니다.`);
+            if (!Number.isFinite(pathId)) throw new Error(`${index + 1}번째 PNG: pathId가 올바르지 않습니다.`);
+            if (!target.pngPath && (!target.existingZipPath || !target.existingPng)) {
+                throw new Error(`${index + 1}번째 PNG 파일 또는 기존 ZIP entry가 없습니다.`);
+            }
 
-        const sourceFileName = path.basename(target.pngPath);
-        const safeFileName = `${index + 1}_${sanitizeFilePart(sourceFileName)}`;
-        const groupDir = sanitizeFilePart(category || 'misc') || 'misc';
-        const pngRelativePath = toPosixPath('files', groupDir, safeFileName);
-        const previewRelativePath = toPosixPath(
-            'previews',
-            groupDir,
-            safeFileName.replace(/\.png$/i, '_preview.png')
-        );
+            const sourceFileName = path.basename(target.pngPath || target.existingPng || `${catalogId}.png`);
+            const safeFileName = `${index + 1}_${sanitizeFilePart(sourceFileName)}`;
+            const groupDir = sanitizeFilePart(category || 'misc') || 'misc';
+            const pngRelativePath = toPosixPath('files', groupDir, safeFileName);
+            const previewRelativePath = toPosixPath(
+                'previews',
+                groupDir,
+                safeFileName.replace(/\.png$/i, '_preview.png')
+            );
 
-        copyPackSourceFile(target.pngPath, path.join(stagingDir, pngRelativePath));
-        writeThumbnail(target.previewPath || target.pngPath, path.join(stagingDir, previewRelativePath));
+            if (target.pngPath) {
+                copyPackSourceFile(target.pngPath, path.join(stagingDir, pngRelativePath));
+                writeThumbnail(target.previewPath || target.pngPath, path.join(stagingDir, previewRelativePath));
+            } else {
+                copyZipEntry(target.existingZipPath!, target.existingPng!, path.join(stagingDir, pngRelativePath));
+                if (target.existingPreview) {
+                    copyZipEntry(target.existingZipPath!, target.existingPreview, path.join(stagingDir, previewRelativePath));
+                } else {
+                    writeThumbnail(path.join(stagingDir, pngRelativePath), path.join(stagingDir, previewRelativePath));
+                }
+            }
 
-        return {
-            catalogId,
-            category,
-            option1,
-            gender: option1,
-            option1Label: target.option1Label?.trim() || option1,
-            option2: target.option2?.trim() || '',
-            displayLabel: target.displayLabel?.trim() || undefined,
-            textureName,
-            pathId,
-            size: target.size || getPngSize(target.pngPath),
-            png: pngRelativePath,
-            preview: previewRelativePath
+            return {
+                catalogId,
+                category,
+                option1,
+                gender: option1,
+                option1Label: target.option1Label?.trim() || option1,
+                option2: target.option2?.trim() || '',
+                displayLabel: target.displayLabel?.trim() || undefined,
+                textureName,
+                pathId,
+                size: target.size || (target.pngPath ? getPngSize(target.pngPath) : undefined),
+                png: pngRelativePath,
+                preview: previewRelativePath
+            };
+        });
+
+        const pack: AssetPackRaw = {
+            schemaVersion: 2,
+            packId: id,
+            packName: input.name.trim(),
+            author: input.author?.trim() || undefined,
+            description: input.description?.trim() || undefined,
+            version,
+            targets: packTargets
         };
+
+        fs.writeFileSync(path.join(stagingDir, 'pack.json'), `${JSON.stringify(pack, null, 2)}\n`, 'utf-8');
+
+        const zipPath = path.join(workDir, `${id}.zip`);
+        const zip = new AdmZip();
+        zip.addLocalFolder(stagingDir);
+        zip.writeZip(zipPath);
+        return zipPath;
+    } finally {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+    }
+}
+
+function validatePackZip(zipPath: string): AssetPackRaw {
+    if (!fs.existsSync(zipPath)) {
+        throw new Error(`배포 ZIP이 생성되지 않았습니다: ${zipPath}`);
+    }
+
+    const zip = new AdmZip(zipPath);
+    const packEntry = zip.getEntry('pack.json');
+    if (!packEntry || packEntry.isDirectory) {
+        throw new Error('배포 ZIP 안에 pack.json이 없습니다.');
+    }
+
+    const pack = JSON.parse(packEntry.getData().toString('utf-8')) as AssetPackRaw;
+    if (!pack.packId || !pack.packName || !Array.isArray(pack.targets)) {
+        throw new Error('배포 ZIP의 pack.json 형식이 올바르지 않습니다.');
+    }
+
+    pack.targets.forEach((target, index) => {
+        if (!target.png || !zip.getEntry(target.png)) {
+            throw new Error(`배포 ZIP target ${index + 1}의 PNG entry가 없습니다: ${target.png || '(empty)'}`);
+        }
+        if (!target.preview || !zip.getEntry(target.preview)) {
+            throw new Error(`배포 ZIP target ${index + 1}의 preview entry가 없습니다: ${target.preview || '(empty)'}`);
+        }
     });
 
-    const pack: AssetPackRaw = {
-        schemaVersion: 2,
-        packId: id,
-        packName: input.name.trim(),
-        author: input.author?.trim() || undefined,
-        description: input.description?.trim() || undefined,
-        version,
-        targets: packTargets
-    };
+    return pack;
+}
 
-    fs.writeFileSync(path.join(stagingDir, 'pack.json'), `${JSON.stringify(pack, null, 2)}\n`, 'utf-8');
+function writeThumbnailFromPackZip(zipPath: string, targetPath: string): void {
+    const pack = validatePackZip(zipPath);
+    const firstTarget = pack.targets[0];
+    const sourceEntry = firstTarget?.png || firstTarget?.preview;
+    if (!sourceEntry) {
+        throw new Error('thumbnail 생성에 사용할 pack target이 없습니다.');
+    }
 
-    const zipPath = path.join(packageDir, `${id}.zip`);
-    const zip = new AdmZip();
-    zip.addLocalFolder(stagingDir);
-    zip.writeZip(zipPath);
-    fs.rmSync(stagingDir, { recursive: true, force: true });
-    return zipPath;
+    writeThumbnailFromBuffer(getZipEntryBuffer(zipPath, sourceEntry), targetPath);
+}
+
+function writeDistributionThumbnail(input: AssetPackDistributionInput, tempZipPath: string, targetPath: string): string | undefined {
+    const firstTarget = input.targets?.[0];
+
+    if (input.thumbnailPath) {
+        if (!fs.existsSync(input.thumbnailPath)) throw new Error('thumbnail PNG 파일을 찾을 수 없습니다.');
+        writeThumbnail(input.thumbnailPath, targetPath);
+        return targetPath;
+    }
+
+    if (firstTarget?.previewPath || firstTarget?.pngPath) {
+        const sourcePath = firstTarget.previewPath || firstTarget.pngPath;
+        if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error('thumbnail PNG 파일을 찾을 수 없습니다.');
+        writeThumbnail(sourcePath, targetPath);
+        return targetPath;
+    }
+
+    if (firstTarget?.existingZipPath && firstTarget.existingPng) {
+        writeThumbnailFromBuffer(getZipEntryBuffer(firstTarget.existingZipPath, firstTarget.existingPng), targetPath);
+        return targetPath;
+    }
+
+    if (fs.existsSync(tempZipPath)) {
+        writeThumbnailFromPackZip(tempZipPath, targetPath);
+        return targetPath;
+    }
+
+    return undefined;
 }
 
 export function createAssetPackDistribution(input: AssetPackDistributionInput): AssetPackDistributionResult {
@@ -514,55 +705,179 @@ export function createAssetPackDistribution(input: AssetPackDistributionInput): 
         throw new Error('배포할 어셋팩 ZIP 또는 PNG target을 추가하세요.');
     }
 
-    const packageDir = path.join(DISTRIBUTION_ROOT, 'packages', id, version);
+    const packageRootDir = path.join(DISTRIBUTION_ROOT, 'packages', id);
+    const packageDir = path.join(packageRootDir, version);
     const thumbnailDir = path.join(DISTRIBUTION_ROOT, 'thumbnails');
-    fs.rmSync(packageDir, { recursive: true, force: true });
-    ensureDir(packageDir);
-    ensureDir(thumbnailDir);
+    const tempRoot = path.join(DISTRIBUTION_ROOT, 'packages', `__tmp-${id}-${Date.now()}`);
+    const tempThumbnailPath = path.join(tempRoot, `${id}.png`);
+    const finalZipPath = path.join(packageDir, `${id}.zip`);
+    const finalThumbnailPath = path.join(thumbnailDir, `${id}.png`);
 
-    const zipPath = input.zipPath
-        ? path.join(packageDir, `${id}.zip`)
-        : buildPackZipFromTargets(input, packageDir, id, version);
-    if (input.zipPath) {
-        if (!fs.existsSync(input.zipPath)) throw new Error('배포할 어셋팩 ZIP 파일을 찾을 수 없습니다.');
-        fs.copyFileSync(input.zipPath, zipPath);
+    cleanupDistributionTempDirs();
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    ensureDir(tempRoot);
+
+    try {
+        const tempZipPath = input.zipPath
+            ? path.join(tempRoot, `${id}.zip`)
+            : buildPackZipFromTargets(input, tempRoot, id, version);
+        if (input.zipPath) {
+            if (!fs.existsSync(input.zipPath)) throw new Error('배포할 어셋팩 ZIP 파일을 찾을 수 없습니다.');
+            fs.copyFileSync(input.zipPath, tempZipPath);
+        }
+
+        validatePackZip(tempZipPath);
+
+        const thumbnailPath = writeDistributionThumbnail(input, tempZipPath, tempThumbnailPath);
+        const thumbnailCatalogPath = thumbnailPath ? `asset-packs/thumbnails/${id}.png` : undefined;
+
+        fs.rmSync(packageRootDir, { recursive: true, force: true });
+        ensureDir(packageDir);
+        ensureDir(thumbnailDir);
+        fs.copyFileSync(tempZipPath, finalZipPath);
+        if (thumbnailPath) {
+            fs.copyFileSync(tempThumbnailPath, finalThumbnailPath);
+        } else {
+            fs.rmSync(finalThumbnailPath, { force: true });
+        }
+
+        validatePackZip(finalZipPath);
+        const sha256 = hashFile(finalZipPath);
+
+        const item: OnlineAssetPackCatalogItem = {
+            id,
+            name,
+            author: input.author?.trim() || undefined,
+            description: input.description?.trim() || undefined,
+            version,
+            downloadPath: `asset-packs/packages/${id}/${version}/${id}.zip`,
+            thumbnailPath: thumbnailCatalogPath,
+            sha256,
+            gameIds: input.gameIds?.filter(Boolean)
+        };
+
+        const resolvedZipPath = resolveDistributionPath(item.downloadPath);
+        const resolvedThumbnailPath = resolveDistributionPath(item.thumbnailPath);
+        if (resolvedZipPath !== finalZipPath || !fs.existsSync(resolvedZipPath)) {
+            throw new Error('index.json downloadPath가 생성된 ZIP과 일치하지 않습니다.');
+        }
+        if (item.thumbnailPath && (!resolvedThumbnailPath || !fs.existsSync(resolvedThumbnailPath))) {
+            throw new Error('index.json thumbnailPath가 생성된 thumbnail과 일치하지 않습니다.');
+        }
+
+        const indexPath = path.join(DISTRIBUTION_ROOT, 'index.json');
+        const index = readDistributionIndex();
+        const filtered = index.assetPacks.filter((existing) => existing.id !== id);
+        filtered.push(item);
+        filtered.sort((a, b) => a.name.localeCompare(b.name));
+
+        ensureDir(DISTRIBUTION_ROOT);
+        fs.writeFileSync(indexPath, `${JSON.stringify({ schemaVersion: 1, assetPacks: filtered }, null, 2)}\n`, 'utf-8');
+
+        return {
+            item,
+            indexPath,
+            zipPath: finalZipPath,
+            thumbnailPath: thumbnailPath ? finalThumbnailPath : undefined
+        };
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+        cleanupDistributionTempDirs();
+        cleanupEmptyDistributionDirs();
+    }
+}
+
+function resolveDistributionPath(relativePath?: string): string {
+    if (!relativePath) return '';
+    return path.join(process.cwd(), relativePath.replaceAll('/', path.sep));
+}
+
+function inspectDistributionItem(item: OnlineAssetPackCatalogItem): {
+    pack?: AssetPackRaw;
+    broken: boolean;
+    brokenReason?: string;
+    missingFiles: string[];
+} {
+    const missingFiles: string[] = [];
+    const zipPath = resolveDistributionPath(item.downloadPath);
+    const thumbnailFilePath = resolveDistributionPath(item.thumbnailPath);
+
+    if (!zipPath || !fs.existsSync(zipPath)) {
+        missingFiles.push(item.downloadPath);
+    }
+    if (item.thumbnailPath && (!thumbnailFilePath || !fs.existsSync(thumbnailFilePath))) {
+        missingFiles.push(item.thumbnailPath);
     }
 
-    let thumbnailPath: string | undefined;
-    let thumbnailCatalogPath: string | undefined;
-    const thumbnailSource = input.thumbnailPath || input.targets?.[0]?.previewPath || input.targets?.[0]?.pngPath;
-    if (thumbnailSource) {
-        if (!fs.existsSync(thumbnailSource)) throw new Error('thumbnail PNG 파일을 찾을 수 없습니다.');
-        thumbnailPath = path.join(thumbnailDir, `${id}.png`);
-        writeThumbnail(thumbnailSource, thumbnailPath);
-        thumbnailCatalogPath = `asset-packs/thumbnails/${id}.png`;
+    if (!zipPath || !fs.existsSync(zipPath)) {
+        return {
+            broken: true,
+            brokenReason: 'index.json이 가리키는 배포 산출물을 찾을 수 없습니다.',
+            missingFiles
+        };
     }
 
-    const item: OnlineAssetPackCatalogItem = {
-        id,
-        name,
-        author: input.author?.trim() || undefined,
-        description: input.description?.trim() || undefined,
-        version,
-        downloadPath: `asset-packs/packages/${id}/${version}/${id}.zip`,
-        thumbnailPath: thumbnailCatalogPath,
-        sha256: hashFile(zipPath),
-        gameIds: input.gameIds?.filter(Boolean)
-    };
+    try {
+        return {
+            pack: validatePackZip(zipPath),
+            broken: missingFiles.length > 0,
+            brokenReason: missingFiles.length > 0
+                ? 'index.json이 가리키는 thumbnail 파일을 찾을 수 없습니다.'
+                : undefined,
+            missingFiles
+        };
+    } catch (error) {
+        return {
+            broken: true,
+            brokenReason: error instanceof Error ? error.message : '배포 ZIP 검증에 실패했습니다.',
+            missingFiles
+        };
+    }
+}
+
+export function getAssetPackDistributionCatalog(): AssetPackDistributionCatalogItem[] {
+    const index = readDistributionIndex();
+
+    return index.assetPacks.map((item) => {
+        const zipPath = resolveDistributionPath(item.downloadPath);
+        const thumbnailFilePath = resolveDistributionPath(item.thumbnailPath);
+        const inspection = inspectDistributionItem(item);
+
+        return {
+            ...item,
+            zipPath,
+            thumbnailFilePath: thumbnailFilePath && fs.existsSync(thumbnailFilePath) ? thumbnailFilePath : undefined,
+            pack: inspection.pack,
+            broken: inspection.broken,
+            brokenReason: inspection.brokenReason,
+            missingFiles: inspection.missingFiles
+        };
+    });
+}
+
+export function deleteAssetPackDistributionItem(id: string): OnlineAssetPackCatalogFile {
+    const safeId = sanitizeFilePart(id.trim());
+    if (!safeId) throw new Error('삭제할 어셋팩 id가 없습니다.');
 
     const indexPath = path.join(DISTRIBUTION_ROOT, 'index.json');
     const index = readDistributionIndex();
-    const filtered = index.assetPacks.filter((existing) => existing.id !== id);
-    filtered.push(item);
-    filtered.sort((a, b) => a.name.localeCompare(b.name));
+    const existing = index.assetPacks.find((item) => item.id === safeId);
+    const nextItems = index.assetPacks.filter((item) => item.id !== safeId);
+
+    cleanupDistributionTempDirs();
+    fs.rmSync(path.join(DISTRIBUTION_ROOT, 'packages', safeId), { recursive: true, force: true });
+
+    if (existing?.thumbnailPath) {
+        const thumbnailPath = resolveDistributionPath(existing.thumbnailPath);
+        if (thumbnailPath) fs.rmSync(thumbnailPath, { force: true });
+    } else {
+        fs.rmSync(path.join(DISTRIBUTION_ROOT, 'thumbnails', `${safeId}.png`), { force: true });
+    }
+
+    cleanupDistributionTempDirs();
+    cleanupEmptyDistributionDirs();
 
     ensureDir(DISTRIBUTION_ROOT);
-    fs.writeFileSync(indexPath, `${JSON.stringify({ schemaVersion: 1, assetPacks: filtered }, null, 2)}\n`, 'utf-8');
-
-    return {
-        item,
-        indexPath,
-        zipPath,
-        thumbnailPath
-    };
+    fs.writeFileSync(indexPath, `${JSON.stringify({ schemaVersion: 1, assetPacks: nextItems }, null, 2)}\n`, 'utf-8');
+    return { schemaVersion: 1, assetPacks: nextItems };
 }

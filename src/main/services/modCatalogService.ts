@@ -9,9 +9,13 @@ import { getStoragePath } from './runtimePaths';
 import {
     deletePackage,
     importZipMod,
+    inspectPackageManifest,
     scanMods,
+    sanitizeUpdatePolicy,
     setPackageEnabled,
+    updatePackageFromZip,
     type ModPackage,
+    type UpdatePolicy,
 } from './modService';
 
 const CATALOG_BASE_URL =
@@ -27,6 +31,7 @@ export type OnlineModCatalogItem = {
     version: string;
     downloadPath: string;
     readmePath?: string;
+    updatePolicy?: UpdatePolicy;
     sha256?: string;
     gameIds?: string[];
     installedPackageId?: string;
@@ -49,6 +54,7 @@ export type ModDistributionInput = {
     zipPath?: string;
     readmeFilePath?: string;
     readmePath?: string;
+    updatePolicy?: UpdatePolicy;
     downloadPath?: string;
     sha256?: string;
     gameIds?: string[];
@@ -220,6 +226,7 @@ export async function installOnlineMod(item: OnlineModCatalogItem): Promise<ModP
     const zipPath = await downloadCatalogZip(item);
     return importZipMod(zipPath, {
         version: item.version,
+        updatePolicy: sanitizeUpdatePolicy(item.updatePolicy),
         source: {
             type: 'github',
             catalogId: item.id,
@@ -228,15 +235,46 @@ export async function installOnlineMod(item: OnlineModCatalogItem): Promise<ModP
     });
 }
 
-export async function updateOnlineMod(item: OnlineModCatalogItem): Promise<ModPackage[]> {
+export async function updateOnlineMod(item: OnlineModCatalogItem, confirmedReplace = false): Promise<ModPackage[]> {
     const existing = findInstalledPackage(item, scanMods());
-    const wasEnabled = existing?.enabled === true;
-    const packages = await installOnlineMod(item);
-    const updated = findInstalledPackage(item, packages);
-    if (wasEnabled && updated) {
-        return setPackageEnabled(updated.id, true).packages;
+    if (!existing) {
+        return installOnlineMod(item);
     }
-    return packages;
+    const wasEnabled = existing?.enabled === true;
+    const zipPath = await downloadCatalogZip(item);
+    const manifest = inspectPackageManifest(zipPath);
+    const updatePolicy = sanitizeUpdatePolicy(manifest.updatePolicy ?? item.updatePolicy) ?? { mode: 'replace-confirm' as const };
+
+    if (updatePolicy.mode === 'replace-confirm') {
+        if (!confirmedReplace) {
+            throw new Error('이 모드는 기존 모드를 삭제 후 새로 설치해야 합니다. 확인 후 다시 시도하세요.');
+        }
+        deletePackage(existing.id);
+        const packages = importZipMod(zipPath, {
+            version: item.version,
+            updatePolicy,
+            source: {
+                type: 'github',
+                catalogId: item.id,
+                downloadPath: item.downloadPath,
+            },
+        });
+        const updated = findInstalledPackage(item, packages);
+        if (wasEnabled && updated) {
+            return setPackageEnabled(updated.id, true).packages;
+        }
+        return packages;
+    }
+
+    return updatePackageFromZip(existing.id, zipPath, {
+        version: item.version,
+        updatePolicy,
+        source: {
+            type: 'github',
+            catalogId: item.id,
+            downloadPath: item.downloadPath,
+        },
+    });
 }
 
 export async function getOnlineModReadme(readmePath: string): Promise<string> {
@@ -308,6 +346,7 @@ export function saveModDistributionItem(input: ModDistributionInput): ModDistrib
         version,
         downloadPath,
         readmePath,
+        updatePolicy: sanitizeUpdatePolicy(input.updatePolicy),
         sha256,
         gameIds: input.gameIds?.map((value) => value.trim()).filter(Boolean),
     };
